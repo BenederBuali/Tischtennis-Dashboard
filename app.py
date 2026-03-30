@@ -599,7 +599,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </tr></thead>
         <tbody>
           {% for t in tabelle %}
-          <tr class="{% if t.ist_swer %}swer-row{% endif %}" data-kuerzel="{{ t.kürzel }}">
+          <tr data-kuerzel="{{ t.kürzel }}">
             <td class="center bold">{{ t.rang }}.</td>
             <td>{{ t.name }}{% if t.ist_swer %} ★{% endif %}</td>
             <td class="center">{{ t.sp }}</td>
@@ -625,7 +625,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <tbody>
           {% if kuenftige %}
             {% for sp in kuenftige %}
-            <tr class="{% if sp.swer %}swer-row{% endif %}" data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
+            <tr data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
               <td class="mono">{{ sp.datum }}</td>
               <td class="mono muted">{{ sp.zeit }}</td>
               <td class="bold">{{ sp.heim }}</td>
@@ -647,7 +647,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th></tr></thead>
         <tbody>
           {% for sp in vergangene[-15:]|reverse %}
-          <tr class="{% if sp.swer %}swer-row{% endif %}">
+          <tr data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
             <td class="mono">{{ sp.datum }}</td>
             <td class="mono muted">{{ sp.zeit }}</td>
             <td class="bold">{{ sp.heim }}</td>

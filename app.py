@@ -139,17 +139,22 @@ def lade_einzelrangliste() -> list:
                 if t.isdigit() and len(t) == 4 and int(t) > 500:
                     rc = t
                     break
+        # Nicht-gewertet: kein Rang (rang_text == "-" oder rang > 900)
+        # XTTV zeigt nicht-gewertete Spieler ohne Rang-Nummer
+        nicht_gewertet = int(rang_text) > 900
+
         spieler.append({
-            "rang":     int(rang_text),
-            "name":     name,
-            "verein":   verein,
-            "einsätze": einsätze,
-            "siege":    s,
-            "niederl":  n,
-            "rc":       rc,
-            "ist_swer": verein.upper() == TEAM_KÜRZEL.upper(),
-            "ist_ich":  False,  # Clientseitig per localStorage
-            "win_pct":  round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
+            "rang":           int(rang_text),
+            "name":           name,
+            "verein":         verein,
+            "einsätze":       einsätze,
+            "siege":          s,
+            "niederl":        n,
+            "rc":             rc,
+            "ist_swer":       verein.upper() == TEAM_KÜRZEL.upper(),
+            "ist_ich":        False,
+            "win_pct":        round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
+            "nicht_gewertet": nicht_gewertet,
         })
     return spieler
 
@@ -400,6 +405,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
                     color: var(--red); font-size: 13px; }
 
+    .ng-row td { opacity: 0.6; }
+    .ng-row:hover td { opacity: 0.8 !important; }
+
     /* Mobile */
     @media (max-width: 600px) {
       header h1 { font-size: 14px; }
@@ -413,6 +421,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <header>
   <h1>🏓 <span>ASKö Schwertberg</span> TT Dashboard</h1>
   <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <select id="mannschaftSelect" onchange="waehleMannschaft(this.value)"
+      title="Mannschaft hervorheben"
+      style="background:var(--bg3); color:var(--text); border:1px solid var(--border);
+             border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer;">
+      <option value="">Mannschaft wählen…</option>
+      {% for m in alle_kuerzel_list %}
+      <option value="{{ m.k }}">{{ m.k }} – {{ m.n }}</option>
+      {% endfor %}
+    </select>
     <div class="update-time">Stand: {{ zuletzt }} Uhr</div>
     <button class="refresh-btn" onclick="location.reload()">↻ Aktualisieren</button>
   </div>
@@ -476,10 +493,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <th>Win-Rate</th><th class="center">RC</th>
         </tr></thead>
         <tbody>
-          {% for s in rangliste[:30] %}
-          <tr class="{% if s.ist_swer %}swer-row{% endif %}" data-name="{{ s.name }}">
-            <td class="center muted">{{ s.rang }}.</td>
-            <td class="bold">{{ s.name }}</td>
+          {% for s in rangliste[:35] %}
+          <tr class="{% if s.ist_swer %}swer-row{% endif %}{% if s.nicht_gewertet %} ng-row{% endif %}"
+              data-name="{{ s.name }}" data-verein="{{ s.verein }}">
+            <td class="center muted">
+              {% if s.nicht_gewertet %}<span title="Nicht gewertet" style="color:#f87171;">–</span>{% else %}{{ s.rang }}.{% endif %}
+            </td>
+            <td class="bold">
+              {{ s.name }}{% if s.nicht_gewertet %} <span style="font-size:11px;color:#f87171;font-weight:400;">(n.g.)</span>{% endif %}
+            </td>
             <td class="center">{{ s.verein }}</td>
             <td class="center">{{ s.einsaetze }}</td>
             <td class="center green">{{ s.siege }}</td>
@@ -487,8 +509,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <td>
               <div class="win-bar-wrap">
                 <div class="win-bar-fill" style="width:{{ [s.win_pct, 100]|min }}%;
-                  background:{% if s.win_pct >= 70 %}#4ade80{% elif s.win_pct >= 50 %}#60a5fa{% else %}#f87171{% endif %};"></div>
-                <span class="win-bar-label">{{ s.win_pct }}%</span>
+                  background:{% if s.win_pct >= 70 %}#4ade80{% elif s.win_pct >= 50 %}#60a5fa{% else %}#f87171{% endif %};
+                  {% if s.nicht_gewertet %}opacity:0.35;{% endif %}"></div>
+                <span class="win-bar-label" {% if s.nicht_gewertet %}style="color:var(--muted);"{% endif %}>{{ s.win_pct }}%</span>
               </div>
             </td>
             <td class="center mono">{{ s.rc }}</td>
@@ -513,7 +536,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </tr></thead>
         <tbody>
           {% for t in tabelle %}
-          <tr class="{% if t.ist_swer %}swer-row{% endif %}">
+          <tr class="{% if t.ist_swer %}swer-row{% endif %}" data-kuerzel="{{ t.kürzel }}">
             <td class="center bold">{{ t.rang }}.</td>
             <td>{{ t.name }}{% if t.ist_swer %} ★{% endif %}</td>
             <td class="center">{{ t.sp }}</td>
@@ -539,7 +562,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <tbody>
           {% if kuenftige %}
             {% for sp in kuenftige %}
-            <tr class="{% if sp.swer %}swer-row{% endif %}">
+            <tr class="{% if sp.swer %}swer-row{% endif %}" data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
               <td class="mono">{{ sp.datum }}</td>
               <td class="mono muted">{{ sp.zeit }}</td>
               <td class="bold">{{ sp.heim }}</td>
@@ -646,6 +669,43 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div><!-- /container -->
 
 <script>
+// ── Mannschafts-Auswahl ──
+const alleMannschaften = {{ alle_kuerzel|safe }};
+
+function waehleMannschaft(kuerzel) {
+  localStorage.setItem('ttMannschaft', kuerzel);
+  highlightMannschaft(kuerzel);
+}
+
+function highlightMannschaft(kuerzel) {
+  // Alle Zeilen zurücksetzen und neu highlighten
+  document.querySelectorAll('tr[data-verein]').forEach(tr => {
+    tr.classList.remove('swer-row');
+    if (kuerzel && tr.dataset.verein === kuerzel) {
+      tr.classList.add('swer-row');
+    }
+  });
+  // Spieler-Karten
+  document.querySelectorAll('.player-card[data-verein]').forEach(card => {
+    card.style.borderColor = (kuerzel && card.dataset.verein === kuerzel)
+      ? 'var(--swer-border)' : 'var(--border)';
+    card.style.background = (kuerzel && card.dataset.verein === kuerzel)
+      ? 'var(--swer)' : 'var(--bg3)';
+  });
+  // Tabellen-Zeilen (Ligatabelle)
+  document.querySelectorAll('tr[data-kuerzel]').forEach(tr => {
+    tr.classList.remove('swer-row');
+    if (kuerzel && tr.dataset.kuerzel === kuerzel) tr.classList.add('swer-row');
+  });
+  // Spieltermine
+  document.querySelectorAll('tr[data-heim], tr[data-gast]').forEach(tr => {
+    tr.classList.remove('swer-row');
+    if (kuerzel && (tr.dataset.heim === kuerzel || tr.dataset.gast === kuerzel)) {
+      tr.classList.add('swer-row');
+    }
+  });
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
@@ -803,6 +863,14 @@ window.addEventListener('DOMContentLoaded', () => {
       highlightSpieler(gespeichert);
     }
   }
+  const gespeichertMannschaft = localStorage.getItem('ttMannschaft');
+  if (gespeichertMannschaft) {
+    const mSel = document.getElementById('mannschaftSelect');
+    if (mSel) {
+      mSel.value = gespeichertMannschaft;
+      highlightMannschaft(gespeichertMannschaft);
+    }
+  }
 });
 </script>
 </body>
@@ -819,6 +887,8 @@ def index():
     rangliste  = data["rangliste"]
     verlauf    = data["verlauf"]
     swer_spieler = [s for s in rangliste if s["ist_swer"]]
+    # Alle Mannschaftskürzel aus der Tabelle für Auswahl
+    alle_kuerzel = json.dumps([{"k": t["kürzel"], "n": t["name"]} for t in data["tabelle"]])
 
     # Umlaute im Template-Kontext sicher machen (einsätze → einsaetze)
     for s in rangliste:
@@ -864,6 +934,8 @@ def index():
         verlauf_labels  = verlauf_labels,
         verlauf_rc      = verlauf_rc_js,
         verlauf_alle    = verlauf_alle_js,
+        alle_kuerzel    = alle_kuerzel,
+        alle_kuerzel_list = data['tabelle'],
         verlauf_siege   = verlauf_siege,
         verlauf_niederl = verlauf_niederl,
     )

@@ -566,7 +566,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               Nicht gewertet
             </td></tr>
           {% endif %}
-          <tr class="{% if s.ist_swer %}swer-row{% endif %}{% if s.nicht_gewertet %} ng-row{% endif %}"
+          <tr class="{% if s.nicht_gewertet %}ng-row{% endif %}"
               data-name="{{ s.name }}" data-verein="{{ s.verein }}">
             <td class="center muted">
               {% if s.nicht_gewertet %}<span title="Nicht gewertet" style="color:var(--muted);">–</span>{% else %}{{ s.rang }}.{% endif %}

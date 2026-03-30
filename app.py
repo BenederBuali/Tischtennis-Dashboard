@@ -491,7 +491,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
              border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer;">
       <option value="">Mannschaft wählen…</option>
       {% for m in alle_kuerzel_list %}
-      <option value="{{ m.k }}">{{ m.k }} – {{ m.n }}</option>
+      <option value="{{ m.kürzel }}">{{ m.kürzel }} – {{ m.name }}</option>
       {% endfor %}
     </select>
     <div class="update-time">Stand: {{ zuletzt }} Uhr</div>

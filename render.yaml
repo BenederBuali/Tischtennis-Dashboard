@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: tt-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 4 --timeout 120
+    envVars:
+      - key: PORT
+        value: 10000
+    autoDeploy: true

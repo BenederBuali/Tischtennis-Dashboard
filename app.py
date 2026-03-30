@@ -4,7 +4,7 @@ TT Dashboard – Flask Web-App
 Scrapt XTTV automatisch alle 4 Stunden und stellt das Dashboard
 als Website bereit. Läuft auf Railway (kostenlos).
 """
- 
+
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -14,29 +14,29 @@ import threading
 import time
 from datetime import datetime
 from flask import Flask, render_template_string, jsonify
- 
+
 app = Flask(__name__)
- 
+
 # ─── Konfiguration ─────────────────────────────────────────────────────────────
- 
+
 LIGA_ID     = 8297
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
 TEAM_KÜRZEL = "SWER"
 MEIN_NAME   = "Beneder Nevio"
 ENCODING    = "iso-8859-1"
 UPDATE_INTERVALL_STUNDEN = 4
- 
+
 VERLAUF_PFAD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tt_verlauf.json")
- 
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/122.0.0.0 Safari/537.36"
 }
- 
+
 # ─── Globaler Daten-Cache ───────────────────────────────────────────────────────
- 
+
 _cache = {
     "tabelle":    [],
     "rangliste":  [],
@@ -47,21 +47,21 @@ _cache = {
     "fehler":     None,
 }
 _cache_lock = threading.Lock()
- 
+
 # ─── Scraping-Hilfsfunktionen ──────────────────────────────────────────────────
- 
+
 def fetch(url: str, params: dict = None) -> BeautifulSoup:
     r = requests.get(url, params=params, headers=HEADERS, timeout=15)
     r.encoding = ENCODING
     return BeautifulSoup(r.text, "html.parser")
- 
+
 def safe_text(el) -> str:
     if el is None:
         return ""
     return el.get_text(separator=" ", strip=True)
- 
+
 # ─── Scraper ────────────────────────────────────────────────────────────────────
- 
+
 def lade_ligatabelle() -> list:
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     tabelle = []
@@ -94,8 +94,8 @@ def lade_ligatabelle() -> list:
                         TEAM_KÜRZEL.upper() in name.upper(),
         })
     return tabelle
- 
- 
+
+
 def lade_einzelrangliste() -> list:
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     spieler = []
@@ -148,12 +148,12 @@ def lade_einzelrangliste() -> list:
             "niederl":  n,
             "rc":       rc,
             "ist_swer": verein.upper() == TEAM_KÜRZEL.upper(),
-            "ist_ich":  name.strip() == MEIN_NAME.strip(),
+            "ist_ich":  False,  # Clientseitig per localStorage
             "win_pct":  round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
         })
     return spieler
- 
- 
+
+
 def lade_spiele() -> tuple:
     alle  = []
     jetzt = datetime.now()
@@ -197,9 +197,9 @@ def lade_spiele() -> tuple:
     for s in unique:
         del s["_dt"]
     return vergangene, kuenftige
- 
+
 # ─── Verlauf ────────────────────────────────────────────────────────────────────
- 
+
 def lade_verlauf() -> list:
     if not os.path.exists(VERLAUF_PFAD):
         return []
@@ -208,14 +208,17 @@ def lade_verlauf() -> list:
             return json.load(f)
     except Exception:
         return []
- 
-def speichere_verlauf(verlauf: list, rc: str, siege: int, niederl: int) -> list:
+
+def speichere_verlauf_spieler(verlauf: list, name: str, rc: str, siege: int, niederl: int) -> list:
+    """RC-Verlauf pro Spieler speichern."""
     if not rc or not rc.isdigit():
         return verlauf
     jetzt  = datetime.now()
     rc_int = int(rc)
-    if verlauf:
-        letzter = verlauf[-1]
+    # Letzten Eintrag dieses Spielers suchen
+    eigene = [e for e in verlauf if e.get("name") == name]
+    if eigene:
+        letzter = eigene[-1]
         letztes_dt = datetime.strptime(
             letzter["datum"] + " " + letzter["zeit"], "%d.%m.%Y %H:%M"
         )
@@ -223,6 +226,7 @@ def speichere_verlauf(verlauf: list, rc: str, siege: int, niederl: int) -> list:
         if letzter["rc"] == rc_int and diff_h < 6:
             return verlauf
     verlauf.append({
+        "name":    name,
         "datum":   jetzt.strftime("%d.%m.%Y"),
         "zeit":    jetzt.strftime("%H:%M"),
         "rc":      rc_int,
@@ -236,9 +240,14 @@ def speichere_verlauf(verlauf: list, rc: str, siege: int, niederl: int) -> list:
     except Exception as e:
         print(f"Verlauf-Speicherfehler: {e}")
     return verlauf
- 
+
+
+def speichere_verlauf(verlauf, rc, siege, niederl):
+    """Legacy-Wrapper."""
+    return verlauf
+
 # ─── Cache-Updater ──────────────────────────────────────────────────────────────
- 
+
 def aktualisiere_daten():
     global _cache
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Lade Daten von XTTV...")
@@ -247,11 +256,12 @@ def aktualisiere_daten():
         rangliste            = lade_einzelrangliste()
         vergangene, kuenftige = lade_spiele()
         verlauf              = lade_verlauf()
- 
-        ich = next((s for s in rangliste if s["ist_ich"]), None)
-        if ich:
-            verlauf = speichere_verlauf(verlauf, ich["rc"], ich["siege"], ich["niederl"])
- 
+
+        # RC-Verlauf: ersten SWER-Spieler mit gespeichertem Rating tracken
+        # (clientseitig nicht möglich, daher tracken wir alle SWER-Spieler im Verlauf)
+        for sp in [s for s in rangliste if s["ist_swer"] and s["rc"]]:
+            verlauf = speichere_verlauf_spieler(verlauf, sp["name"], sp["rc"], sp["siege"], sp["niederl"])
+
         with _cache_lock:
             _cache["tabelle"]    = tabelle
             _cache["rangliste"]  = rangliste
@@ -260,31 +270,31 @@ def aktualisiere_daten():
             _cache["verlauf"]    = verlauf
             _cache["zuletzt"]    = datetime.now().strftime("%d.%m.%Y %H:%M")
             _cache["fehler"]     = None
- 
+
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Update OK – "
               f"{len(tabelle)} Teams, {len(rangliste)} Spieler")
- 
+
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Fehler: {e}")
         with _cache_lock:
             _cache["fehler"] = str(e)
- 
- 
+
+
 def hintergrund_updater():
     """Läuft als Thread und aktualisiert alle N Stunden."""
     while True:
         aktualisiere_daten()
         time.sleep(UPDATE_INTERVALL_STUNDEN * 3600)
- 
- 
+
+
 # ─── HTML-Template ──────────────────────────────────────────────────────────────
- 
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="de">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TT Dashboard – ASKö Schwertberg</title>
+  <title>ASKö Schwertberg TT Dashboard</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -298,7 +308,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
     body { background: var(--bg); color: var(--text);
            font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
- 
+
     header { background: var(--bg2); border-bottom: 1px solid var(--border);
              padding: 14px 20px; display: flex; align-items: center;
              justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -309,9 +319,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                    color: var(--muted); padding: 5px 12px; border-radius: 6px;
                    cursor: pointer; font-size: 12px; }
     .refresh-btn:hover { color: var(--text); border-color: var(--accent); }
- 
+
     .container { max-width: 1100px; margin: 0 auto; padding: 20px 14px; }
- 
+
     .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
                margin-bottom: 20px; overflow-x: auto; }
     .tab { padding: 8px 16px; border-radius: var(--radius) var(--radius) 0 0;
@@ -322,19 +332,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .tab.active { color: var(--text); background: var(--bg2); border-color: var(--border); }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
- 
+
     .card { background: var(--bg2); border: 1px solid var(--border);
             border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
     .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase;
                   letter-spacing: 0.08em; color: var(--muted); margin-bottom: 14px; }
- 
+
     .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                   gap: 10px; margin-bottom: 16px; }
     .metric { background: var(--bg3); border-radius: var(--radius); padding: 12px 14px; }
     .metric-label { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
     .metric-value { font-size: 20px; font-weight: 600; }
     .metric-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
- 
+
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; padding: 7px 10px; font-size: 11px; font-weight: 600;
@@ -347,21 +357,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .swer-row:hover td { background: #204570 !important; }
     .ich-row td { background: var(--ich) !important; }
     .ich-row:hover td { background: #1f3f1f !important; }
- 
+
     .center { text-align: center; }
     .bold { font-weight: 600; }
     .mono { font-family: 'Consolas', monospace; }
     .muted { color: var(--muted); }
     .green { color: var(--green); font-weight: 600; }
     .red { color: var(--red); }
- 
+
     .win-bar-wrap { position: relative; height: 16px; background: var(--bg3);
                     border-radius: 99px; min-width: 70px; overflow: hidden; }
     .win-bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
                     border-radius: 99px; opacity: 0.7; }
     .win-bar-label { position: absolute; right: 5px; top: 50%;
                      transform: translateY(-50%); font-size: 11px; font-weight: 600; }
- 
+
     .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
     .player-card { background: var(--bg3); border: 1px solid var(--border);
                    border-radius: var(--radius); padding: 12px;
@@ -378,18 +388,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .stat-loss { color: var(--red); }
     .stat-sep  { color: var(--muted); margin: 0 2px; }
     .stat-pct  { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
- 
+
     .chart-wrap { position: relative; height: 260px; }
- 
+
     .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px;
               color: var(--muted); margin-top: 8px; }
     .legend span { display: flex; align-items: center; gap: 4px; }
     .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
- 
+
     .error-banner { background: #3a1a1a; border: 1px solid var(--red);
                     border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
                     color: var(--red); font-size: 13px; }
- 
+
     /* Mobile */
     @media (max-width: 600px) {
       header h1 { font-size: 14px; }
@@ -399,21 +409,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </style>
 </head>
 <body>
- 
+
 <header>
-  <h1>🏓 TT Dashboard – <span>ASKö Schwertberg</span></h1>
+  <h1>🏓 <span>ASKö Schwertberg</span> TT Dashboard</h1>
   <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
     <div class="update-time">Stand: {{ zuletzt }} Uhr</div>
     <button class="refresh-btn" onclick="location.reload()">↻ Aktualisieren</button>
   </div>
 </header>
- 
+
 <div class="container">
- 
+
 {% if fehler %}
 <div class="error-banner">⚠ Fehler beim letzten Datenladen: {{ fehler }}</div>
 {% endif %}
- 
+
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('uebersicht')">Übersicht</div>
   <div class="tab" onclick="switchTab('rangliste')">Rangliste</div>
@@ -421,17 +431,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="tab" onclick="switchTab('spiele')">Spieltermine</div>
   <div class="tab" onclick="switchTab('verlauf')">Mein Verlauf</div>
 </div>
- 
+
 <!-- ÜBERSICHT -->
 <div id="tab-uebersicht" class="tab-content active">
   <div class="card">
     <div class="card-title">SWER-Spieler in der Liga</div>
     <div class="player-grid">
       {% for s in swer_spieler %}
-      <div class="player-card {% if s.ist_ich %}ich-card{% endif %}">
+      <div class="player-card ">
         <div class="player-avatar">{{ s.name.split()[0][0] }}{{ s.name.split()[-1][0] }}</div>
         <div>
-          <div class="player-name">{{ s.name }}{% if s.ist_ich %} ← du{% endif %}</div>
+          <div class="player-name">{{ s.name }}</div>
           <div class="player-meta">Rang {{ s.rang }} · RC {{ s.rc }} · {{ s.einsaetze }} Einsätze</div>
         </div>
         <div class="player-stats">
@@ -453,7 +463,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
- 
+
 <!-- RANGLISTE -->
 <div id="tab-rangliste" class="tab-content">
   <div class="card">
@@ -467,9 +477,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </tr></thead>
         <tbody>
           {% for s in rangliste[:30] %}
-          <tr class="{% if s.ist_swer %}swer-row{% endif %}{% if s.ist_ich %} ich-row{% endif %}">
+          <tr class="{% if s.ist_swer %}swer-row{% endif %}" data-name="{{ s.name }}">
             <td class="center muted">{{ s.rang }}.</td>
-            <td class="bold">{{ s.name }}{% if s.ist_ich %} ←{% endif %}</td>
+            <td class="bold">{{ s.name }}</td>
             <td class="center">{{ s.verein }}</td>
             <td class="center">{{ s.einsaetze }}</td>
             <td class="center green">{{ s.siege }}</td>
@@ -489,7 +499,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
- 
+
 <!-- LIGATABELLE -->
 <div id="tab-tabelle" class="tab-content">
   <div class="card">
@@ -518,7 +528,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
- 
+
 <!-- SPIELTERMINE -->
 <div id="tab-spiele" class="tab-content">
   <div class="card">
@@ -565,28 +575,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
- 
+
 <!-- MEIN VERLAUF -->
 <div id="tab-verlauf" class="tab-content">
-  <div class="metric-row">
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Spieler auswählen</div>
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <select id="spielerSelect" onchange="waehleSpieler(this.value)"
+        style="background:var(--bg3); color:var(--text); border:1px solid var(--border);
+               border-radius:6px; padding:8px 12px; font-size:14px; min-width:200px;">
+        <option value="">– Spieler wählen –</option>
+        {% for s in swer_spieler %}
+        <option value="{{ s.name }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      <span id="aktSpielerInfo" style="font-size:12px; color:var(--muted);"></span>
+    </div>
+  </div>
+  <div id="verlaufInhalt">
+    <p style="color:var(--muted); text-align:center; padding:3rem;">
+      ↑ Wähle deinen Namen um deinen Verlauf zu sehen
+    </p>
+  </div>
+  <div id="verlaufDaten" style="display:none;">
+  <div class="metric-row" id="verlaufMetrics">
     <div class="metric">
       <div class="metric-label">Aktueller RC</div>
-      <div class="metric-value" style="color:var(--accent);">{{ letzter_rc }}</div>
+      <div class="metric-value" style="color:var(--accent);" id="mRC">–</div>
       <div class="metric-sub">Rating Central</div>
     </div>
     <div class="metric">
       <div class="metric-label">Letzte Änderung</div>
-      <div class="metric-value" style="color:{{ rc_diff_color }};">{{ rc_diff_str }}</div>
+      <div class="metric-value" id="mDiff">–</div>
       <div class="metric-sub">seit letztem Eintrag</div>
     </div>
     <div class="metric">
       <div class="metric-label">Einträge</div>
-      <div class="metric-value">{{ verlauf|length }}</div>
-      <div class="metric-sub">seit erstem Start</div>
+      <div class="metric-value" id="mAnzahl">–</div>
+      <div class="metric-sub">gesamt</div>
     </div>
     <div class="metric">
       <div class="metric-label">Erster Eintrag</div>
-      <div class="metric-value" style="font-size:15px;">{{ erster_eintrag }}</div>
+      <div class="metric-value" style="font-size:15px;" id="mErster">–</div>
     </div>
   </div>
   <div class="card">
@@ -594,7 +624,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="chart-wrap" style="height:280px;"><canvas id="verlaufChart"></canvas></div>
   </div>
   <div class="card">
-    <div class="card-title">Siege & Niederlagen Verlauf</div>
+    <div class="card-title">Siege &amp; Niederlagen Verlauf</div>
     <div class="chart-wrap" style="height:220px;"><canvas id="snChart"></canvas></div>
   </div>
   <div class="card">
@@ -606,35 +636,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <th class="center">RC</th><th class="center">Änderung</th>
           <th class="center">Siege</th><th class="center">Niederlagen</th>
         </tr></thead>
-        <tbody>
-          {% for e in verlauf|reverse %}
-          {% set loop_idx = loop.revindex0 %}
-          <tr>
-            <td class="mono">{{ e.datum }}</td>
-            <td class="mono muted">{{ e.zeit }}</td>
-            <td class="center bold" style="color:var(--accent);">{{ e.rc }}</td>
-            <td class="center bold" style="color:
-              {% if verlauf|length > loop.revindex %}
-                {% set prev = verlauf[verlauf|length - loop.revindex - 1] %}
-                {% if e.rc > prev.rc %}#4ade80{% elif e.rc < prev.rc %}#f87171{% else %}#6b7280{% endif %}
-              {% else %}#6b7280{% endif %};">
-              {% if verlauf|length > loop.revindex %}
-                {% set prev_rc = verlauf[verlauf|length - loop.revindex - 1].rc %}
-                {% if e.rc - prev_rc > 0 %}+{{ e.rc - prev_rc }}{% elif e.rc - prev_rc < 0 %}{{ e.rc - prev_rc }}{% else %}±0{% endif %}
-              {% else %}–{% endif %}
-            </td>
-            <td class="center green">{{ e.siege }}</td>
-            <td class="center red">{{ e.niederl }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
+        <tbody id="verlaufTbody"></tbody>
       </table>
     </div>
   </div>
+  </div><!-- /verlaufDaten -->
 </div>
- 
+
 </div><!-- /container -->
- 
+
 <script>
 function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -642,12 +652,12 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   event.target.classList.add('active');
 }
- 
+
 // Balken-Chart SWER Spieler
 const swernamen  = {{ chart_namen|safe }};
 const swersiege  = {{ chart_siege|safe }};
 const swernied   = {{ chart_niederl|safe }};
- 
+
 new Chart(document.getElementById('barChart'), {
   type: 'bar',
   data: {
@@ -666,21 +676,73 @@ new Chart(document.getElementById('barChart'), {
     }
   }
 });
- 
-// Verlauf-Charts
-const vLabels  = {{ verlauf_labels|safe }};
-const vRC      = {{ verlauf_rc|safe }};
-const vSiege   = {{ verlauf_siege|safe }};
-const vNied    = {{ verlauf_niederl|safe }};
- 
-if (vLabels.length > 0) {
-  new Chart(document.getElementById('verlaufChart'), {
+
+// ── Verlauf pro Spieler (alle Daten vom Server) ──
+const alleVerlauf = {{ verlauf_alle|safe }};
+let verlaufChartObj = null;
+let snChartObj = null;
+
+function waehleSpieler(name) {
+  localStorage.setItem('ttSpielerName', name);
+  zeigeVerlauf(name);
+  // Rangliste neu highlighten
+  highlightSpieler(name);
+}
+
+function highlightSpieler(name) {
+  document.querySelectorAll('#tab-rangliste tr[data-name]').forEach(tr => {
+    tr.classList.remove('ich-row');
+    if (tr.dataset.name === name) tr.classList.add('ich-row');
+  });
+  document.querySelectorAll('.player-card[data-name]').forEach(card => {
+    card.classList.remove('ich-card');
+    if (card.dataset.name === name) card.classList.add('ich-card');
+  });
+}
+
+function zeigeVerlauf(name) {
+  if (!name) return;
+  const eintraege = alleVerlauf.filter(e => e.name === name);
+  const daten = document.getElementById('verlaufDaten');
+  const inhalt = document.getElementById('verlaufInhalt');
+
+  if (eintraege.length === 0) {
+    inhalt.innerHTML = '<p style="color:#6b7280;text-align:center;padding:2rem;">Noch keine Verlaufsdaten für ' + name + '.<br>Kommen beim nächsten automatischen Update.</p>';
+    daten.style.display = 'none';
+    return;
+  }
+
+  daten.style.display = 'block';
+  inhalt.innerHTML = '';
+
+  const letzter = eintraege[eintraege.length - 1];
+  const vorletzter = eintraege.length >= 2 ? eintraege[eintraege.length - 2] : null;
+  const diff = vorletzter ? letzter.rc - vorletzter.rc : 0;
+  const diffStr = diff > 0 ? '+' + diff : diff < 0 ? String(diff) : '±0';
+  const diffColor = diff > 0 ? '#4ade80' : diff < 0 ? '#f87171' : '#6b7280';
+
+  document.getElementById('mRC').textContent = letzter.rc;
+  document.getElementById('mDiff').textContent = diffStr;
+  document.getElementById('mDiff').style.color = diffColor;
+  document.getElementById('mAnzahl').textContent = eintraege.length;
+  document.getElementById('mErster').textContent = eintraege[0].datum;
+
+  const labels = eintraege.map(e => e.datum);
+  const rcVals = eintraege.map(e => e.rc);
+  const siegeVals = eintraege.map(e => e.siege);
+  const niedVals = eintraege.map(e => e.niederl);
+
+  // Charts neu zeichnen oder updaten
+  if (verlaufChartObj) verlaufChartObj.destroy();
+  if (snChartObj) snChartObj.destroy();
+
+  verlaufChartObj = new Chart(document.getElementById('verlaufChart'), {
     type: 'line',
     data: {
-      labels: vLabels,
-      datasets: [{ label: 'RC', data: vRC,
-        borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,0.1)',
-        borderWidth: 2, pointRadius: 4, tension: 0.3, fill: true }]
+      labels,
+      datasets: [{ data: rcVals, borderColor: '#378ADD',
+        backgroundColor: 'rgba(55,138,221,0.1)', borderWidth: 2,
+        pointRadius: 4, tension: 0.3, fill: true }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -691,13 +753,14 @@ if (vLabels.length > 0) {
       }
     }
   });
-  new Chart(document.getElementById('snChart'), {
+
+  snChartObj = new Chart(document.getElementById('snChart'), {
     type: 'line',
     data: {
-      labels: vLabels,
+      labels,
       datasets: [
-        { label: 'Siege',       data: vSiege, borderColor: '#4ade80', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
-        { label: 'Niederlagen', data: vNied,  borderColor: '#f87171', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
+        { data: siegeVals, borderColor: '#4ade80', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
+        { data: niedVals,  borderColor: '#f87171', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
       ]
     },
     options: {
@@ -709,33 +772,60 @@ if (vLabels.length > 0) {
       }
     }
   });
-} else {
-  document.getElementById('verlaufChart').parentElement.innerHTML =
-    '<p style="color:#6b7280;text-align:center;padding:2rem;">Noch keine Daten – beim ersten Aufruf wird der erste Eintrag gespeichert.</p>';
-  document.getElementById('snChart').parentElement.innerHTML = '';
+
+  // Tabelle
+  const tbody = document.getElementById('verlaufTbody');
+  tbody.innerHTML = '';
+  [...eintraege].reverse().forEach((e, i) => {
+    const idx = eintraege.length - 1 - i;
+    const prev = idx > 0 ? eintraege[idx - 1] : null;
+    const d = prev ? e.rc - prev.rc : 0;
+    const dStr = prev ? (d > 0 ? '+'+d : d < 0 ? String(d) : '±0') : '–';
+    const dCol = d > 0 ? '#4ade80' : d < 0 ? '#f87171' : '#6b7280';
+    tbody.innerHTML += `<tr>
+      <td class="mono">${e.datum}</td><td class="mono muted">${e.zeit}</td>
+      <td class="center bold" style="color:#378ADD;">${e.rc}</td>
+      <td class="center bold" style="color:${dCol};">${dStr}</td>
+      <td class="center green">${e.siege}</td>
+      <td class="center red">${e.niederl}</td>
+    </tr>`;
+  });
 }
+
+// ── Beim Laden: gespeicherten Spieler wiederherstellen ──
+window.addEventListener('DOMContentLoaded', () => {
+  const gespeichert = localStorage.getItem('ttSpielerName');
+  if (gespeichert) {
+    const sel = document.getElementById('spielerSelect');
+    if (sel) {
+      sel.value = gespeichert;
+      zeigeVerlauf(gespeichert);
+      highlightSpieler(gespeichert);
+    }
+  }
+});
 </script>
 </body>
 </html>
 """
- 
+
 # ─── Flask-Route ────────────────────────────────────────────────────────────────
- 
+
 @app.route("/")
 def index():
     with _cache_lock:
         data = dict(_cache)
- 
+
     rangliste  = data["rangliste"]
     verlauf    = data["verlauf"]
     swer_spieler = [s for s in rangliste if s["ist_swer"]]
- 
+
     # Umlaute im Template-Kontext sicher machen (einsätze → einsaetze)
     for s in rangliste:
         s["einsaetze"] = s.get("einsätze", 0)
     for s in swer_spieler:
         s["einsaetze"] = s.get("einsätze", 0)
- 
+
     # Verlauf-Kennzahlen
     letzter_rc    = verlauf[-1]["rc"] if verlauf else "–"
     vorheriger_rc = verlauf[-2]["rc"] if len(verlauf) >= 2 else (letzter_rc if letzter_rc != "–" else 0)
@@ -743,7 +833,7 @@ def index():
     rc_diff_str   = (f"+{rc_diff}" if rc_diff > 0 else str(rc_diff)) if rc_diff != 0 else "±0"
     rc_diff_color = "#4ade80" if rc_diff > 0 else "#f87171" if rc_diff < 0 else "#6b7280"
     erster_eintrag = verlauf[0]["datum"] if verlauf else "–"
- 
+
     # Chart-Daten
     chart_namen   = json.dumps([s["name"].split()[0] for s in swer_spieler])
     chart_siege   = json.dumps([s["siege"]   for s in swer_spieler])
@@ -752,7 +842,7 @@ def index():
     verlauf_rc_js   = json.dumps([e["rc"]      for e in verlauf])
     verlauf_siege   = json.dumps([e["siege"]   for e in verlauf])
     verlauf_niederl = json.dumps([e["niederl"] for e in verlauf])
- 
+
     return render_template_string(
         HTML_TEMPLATE,
         tabelle       = data["tabelle"],
@@ -772,11 +862,12 @@ def index():
         chart_niederl = chart_niederl,
         verlauf_labels  = verlauf_labels,
         verlauf_rc      = verlauf_rc_js,
+        verlauf_alle    = verlauf_alle_js,
         verlauf_siege   = verlauf_siege,
         verlauf_niederl = verlauf_niederl,
     )
- 
- 
+
+
 @app.route("/api/status")
 def status():
     with _cache_lock:
@@ -785,15 +876,15 @@ def status():
             "spieler":  len(_cache["rangliste"]),
             "fehler":   _cache["fehler"],
         })
- 
- 
- 
- 
+
+
+
+
 # ─── Start ──────────────────────────────────────────────────────────────────────
- 
+
 _thread_gestartet = False
 _thread_lock = threading.Lock()
- 
+
 def starte_hintergrund_thread():
     """Thread einmalig starten – thread-safe."""
     global _thread_gestartet
@@ -802,14 +893,14 @@ def starte_hintergrund_thread():
             _thread_gestartet = True
             t = threading.Thread(target=hintergrund_updater, daemon=True)
             t.start()
- 
- 
+
+
 @app.before_request
 def sicherstelle_thread():
     """Beim ersten Request den Updater-Thread starten (funktioniert mit gunicorn)."""
     starte_hintergrund_thread()
- 
- 
+
+
 if __name__ == "__main__":
     starte_hintergrund_thread()
     port = int(os.environ.get("PORT", 5000))

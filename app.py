@@ -257,10 +257,7 @@ def lade_einzelrangliste(liga_id: int = LIGA_ID_DEFAULT) -> list:
     return spieler
 
 
-def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
-    alle  = []
-    jetzt = datetime.now()
-    soup  = fetch(BASE_URL, {"do": "spiele", "lid": liga_id, "zeit": "alle"})
+def _parse_spiele_seite(soup, alle: list):
     for item in soup.select("li, tr"):
         text = safe_text(item)
         m = re.search(r"(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})", text)
@@ -274,7 +271,6 @@ def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
         if not mm:
             continue
         heim, gast = mm.group(1), mm.group(2)
-        # Ergebnis nur NACH den Teamkürzeln suchen (nicht Uhrzeit erwischen)
         rest = text[mm.end():]
         erg = re.search(r"\b(\d{1,2}):(\d{1,2})\b", rest)
         ergebnis = f"{erg.group(1)}:{erg.group(2)}" if erg else ""
@@ -289,6 +285,22 @@ def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
             "ts":    dt.timestamp(),
             "_dt":   dt,
         })
+
+
+def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
+    alle  = []
+    jetzt = datetime.now()
+    params_base = {"do": "spiele", "lid": liga_id, "zeit": "alle"}
+    soup = fetch(BASE_URL, params_base)
+    _parse_spiele_seite(soup, alle)
+    # Pagination erkennen: "Seite 1 von X"
+    seiten_text = soup.get_text()
+    pm = re.search(r"Seite\s+\d+\s+von\s+(\d+)", seiten_text)
+    if pm:
+        gesamt = int(pm.group(1))
+        for seite in range(2, gesamt + 1):
+            soup2 = fetch(BASE_URL, {**params_base, "seite": seite})
+            _parse_spiele_seite(soup2, alle)
     # Deduplizieren
     seen, unique = set(), []
     for s in alle:

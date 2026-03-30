@@ -773,9 +773,10 @@ function highlightMannschaft(kuerzel) {
   // Spieltermine
   document.querySelectorAll('tr[data-heim], tr[data-gast]').forEach(tr => {
     tr.classList.remove('swer-row');
-    if (kuerzel && (tr.dataset.heim === kuerzel || tr.dataset.gast === kuerzel)) {
-      tr.classList.add('swer-row');
-    }
+    const h = (tr.dataset.heim || '').trim().toUpperCase();
+    const g = (tr.dataset.gast || '').trim().toUpperCase();
+    const k = (kuerzel || '').trim().toUpperCase();
+    if (k && (h === k || g === k)) tr.classList.add('swer-row');
   });
 }
 
@@ -1103,16 +1104,24 @@ def index():
 def debug():
     """Zeigt rohe Scraper-Ergebnisse zum Debuggen."""
     with _cache_lock:
-        tabelle   = _cache["tabelle"]
-        rangliste = _cache["rangliste"]
+        tabelle    = _cache["tabelle"]
+        rangliste  = _cache["rangliste"]
+        vergangene = _cache["vergangene"]
+        kuenftige  = _cache["kuenftige"]
     lines = ["<pre style='font-family:monospace; font-size:12px;'>"]
     lines.append(f"=== LIGATABELLE ({len(tabelle)} Eintraege) ===\n")
     for t in tabelle:
-        lines.append(f"  {t['rang']}. {t['kürzel']:8} {t['name'][:30]:30} P={t['p']}\n")
+        lines.append(f"  {t['rang']}. {t['kürzel']:8} {t['name'][:30]:30} Sp={t['sp']} S={t['s']} U={t['u']} N={t['n']} P={t['p']}\n")
     lines.append(f"\n=== RANGLISTE ({len(rangliste)} Spieler) ===\n")
     for s in rangliste[:40]:
         ng = " [n.g.]" if s['nicht_gewertet'] else ""
         lines.append(f"  {str(s['rang']):5} {s['name'][:25]:25} {s['verein']:6} {s['siege']}:{s['niederl']} RC={s['rc']}{ng}\n")
+    lines.append(f"\n=== VERGANGENE SPIELE ({len(vergangene)}) – letzte 10 ===\n")
+    for sp in vergangene[-10:]:
+        lines.append(f"  {sp['datum']} {sp['zeit']}  heim='{sp['heim']}'  gast='{sp['gast']}'  {sp['ergebnis']}\n")
+    lines.append(f"\n=== KUENFTIGE SPIELE ({len(kuenftige)}) ===\n")
+    for sp in kuenftige[:10]:
+        lines.append(f"  {sp['datum']} {sp['zeit']}  heim='{sp['heim']}'  gast='{sp['gast']}'\n")
     lines.append("</pre>")
     return "".join(lines)
 

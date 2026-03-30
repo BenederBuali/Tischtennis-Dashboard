@@ -176,13 +176,17 @@ def lade_einzelrangliste() -> list:
                 except ValueError:
                     pass
 
-        # RC-Rating: Link zu ratingscentral, Text = vierstellige Zahl
+        # RC-Rating + Player-ID: Link zu ratingscentral
         rc = ""
+        rc_player_id = ""
         rc_link = row.find("a", href=lambda h: h and "ratingscentral" in (h or ""))
         if rc_link:
             rc_text = rc_link.get_text(strip=True)
             if rc_text.isdigit() and len(rc_text) in (3, 4):
                 rc = rc_text
+            pid_m = re.search(r"PlayerID=(\d+)", rc_link.get("href", ""))
+            if pid_m:
+                rc_player_id = pid_m.group(1)
         # Fallback: erste 3-4-stellige Zahl > 500 in den Zellen
         if not rc:
             for t in texts:
@@ -199,6 +203,7 @@ def lade_einzelrangliste() -> list:
             "siege":          s,
             "niederl":        n,
             "rc":             rc,
+            "rc_player_id":   rc_player_id,
             "ist_swer":       verein.upper() == TEAM_KÜRZEL.upper(),
             "ist_ich":        False,
             "win_pct":        round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
@@ -225,7 +230,9 @@ def lade_spiele() -> tuple:
         if not mm:
             continue
         heim, gast = mm.group(1), mm.group(2)
-        erg = re.search(r"\b(\d+):(\d+)\b", text)
+        # Ergebnis nur NACH den Teamkürzeln suchen (nicht Uhrzeit erwischen)
+        rest = text[mm.end():]
+        erg = re.search(r"\b(\d{1,2}):(\d{1,2})\b", rest)
         ergebnis = f"{erg.group(1)}:{erg.group(2)}" if erg else ""
         swer = TEAM_KÜRZEL.lower() in heim.lower() or TEAM_KÜRZEL.lower() in gast.lower()
         alle.append({
@@ -262,6 +269,76 @@ def lade_verlauf() -> list:
             return json.load(f)
     except Exception:
         return []
+
+def lade_rc_history(rc_player_id: str, name: str) -> list:
+    """Historische RC-Werte von RatingsCentral.com scrapen."""
+    if not rc_player_id:
+        return []
+    try:
+        r = requests.get(
+            "https://www.ratingscentral.com/PlayerHistory.php",
+            params={"PlayerID": rc_player_id},
+            headers=HEADERS, timeout=15
+        )
+        soup = BeautifulSoup(r.text, "html.parser")
+        eintraege = []
+        for row in soup.find_all("tr"):
+            zellen = row.find_all("td")
+            if len(zellen) < 5:
+                continue
+            datum_text = safe_text(zellen[0]).strip()
+            if not re.match(r"\d{4}-\d{2}-\d{2}$", datum_text):
+                continue
+            rating_text = safe_text(zellen[4]).strip()
+            rm = re.match(r"(\d+)", rating_text)
+            if not rm:
+                continue
+            try:
+                datum_dt = datetime.strptime(datum_text, "%Y-%m-%d")
+            except ValueError:
+                continue
+            eintraege.append({
+                "name":    name,
+                "datum":   datum_dt.strftime("%d.%m.%Y"),
+                "zeit":    "00:00",
+                "rc":      int(rm.group(1)),
+                "siege":   0,
+                "niederl": 0,
+                "ts":      datum_dt.timestamp(),
+            })
+        return sorted(eintraege, key=lambda x: x["ts"])
+    except Exception as e:
+        print(f"RC-History Fehler ({name}): {e}")
+        return []
+
+
+def backfill_verlauf(verlauf: list, spieler: list) -> list:
+    """Für SWER-Spieler ohne Verlauf historische Daten von RatingsCentral holen."""
+    geaendert = False
+    for sp in spieler:
+        if not sp.get("ist_swer") or not sp.get("rc_player_id"):
+            continue
+        eigene = [e for e in verlauf if e.get("name") == sp["name"]]
+        if len(eigene) >= 3:
+            continue  # genug Daten vorhanden
+        print(f"  Backfill RC-History für {sp['name']} (ID={sp['rc_player_id']})...")
+        historisch = lade_rc_history(sp["rc_player_id"], sp["name"])
+        if not historisch:
+            continue
+        existierende_ts = {e["ts"] for e in verlauf if e.get("name") == sp["name"]}
+        neu = [h for h in historisch if h["ts"] not in existierende_ts]
+        verlauf.extend(neu)
+        geaendert = True
+        print(f"  → {len(neu)} Einträge hinzugefügt")
+    if geaendert:
+        verlauf.sort(key=lambda x: x["ts"])
+        try:
+            with open(VERLAUF_PFAD, "w", encoding="utf-8") as f:
+                json.dump(verlauf, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Verlauf-Speicherfehler nach Backfill: {e}")
+    return verlauf
+
 
 def speichere_verlauf_spieler(verlauf: list, name: str, rc: str, siege: int, niederl: int) -> list:
     """RC-Verlauf pro Spieler speichern."""
@@ -311,8 +388,10 @@ def aktualisiere_daten():
         vergangene, kuenftige = lade_spiele()
         verlauf              = lade_verlauf()
 
-        # RC-Verlauf: ersten SWER-Spieler mit gespeichertem Rating tracken
-        # (clientseitig nicht möglich, daher tracken wir alle SWER-Spieler im Verlauf)
+        # RC-History Backfill: fehlende Spieler von RatingsCentral nachladen
+        verlauf = backfill_verlauf(verlauf, rangliste)
+
+        # Aktuellen Stand speichern
         for sp in [s for s in rangliste if s["ist_swer"] and s["rc"]]:
             verlauf = speichere_verlauf_spieler(verlauf, sp["name"], sp["rc"], sp["siege"], sp["niederl"])
 

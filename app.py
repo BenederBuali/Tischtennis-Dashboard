@@ -105,7 +105,10 @@ def lade_ligatabelle() -> list:
             continue
 
         # Nur positive ganze Zahlen (Sp, S, U, N, ..., P)
+        # Rang-Zahl aus der Liste entfernen (XTTV rendert Rang ohne Punkt)
         nums = [int(t.strip()) for t in texts if t.strip().isdigit()]
+        if nums and nums[0] == rang:
+            nums = nums[1:]
         if len(nums) < 5:
             continue
 
@@ -866,40 +869,124 @@ function zeigeVerlauf(name) {
   if (verlaufChartObj) verlaufChartObj.destroy();
   if (snChartObj) snChartObj.destroy();
 
-  verlaufChartObj = new Chart(document.getElementById('verlaufChart'), {
+  // Gradient für RC-Chart
+  const rcCanvas = document.getElementById('verlaufChart');
+  const rcCtx = rcCanvas.getContext('2d');
+  const rcGrad = rcCtx.createLinearGradient(0, 0, 0, rcCanvas.offsetHeight || 280);
+  rcGrad.addColorStop(0, 'rgba(55,138,221,0.35)');
+  rcGrad.addColorStop(1, 'rgba(55,138,221,0.0)');
+
+  const commonScales = {
+    x: {
+      ticks: { color: '#6b7280', maxTicksLimit: 8, font: { size: 11 } },
+      grid: { color: '#1e2133' }
+    },
+    y: {
+      ticks: { color: '#6b7280', font: { size: 11 } },
+      grid: { color: '#1e2133' }
+    }
+  };
+
+  verlaufChartObj = new Chart(rcCanvas, {
     type: 'line',
     data: {
       labels,
-      datasets: [{ data: rcVals, borderColor: '#378ADD',
-        backgroundColor: 'rgba(55,138,221,0.1)', borderWidth: 2,
-        pointRadius: 4, tension: 0.3, fill: true }]
+      datasets: [{
+        data: rcVals,
+        borderColor: '#378ADD',
+        backgroundColor: rcGrad,
+        borderWidth: 2.5,
+        pointRadius: rcVals.length <= 20 ? 5 : 3,
+        pointBackgroundColor: '#378ADD',
+        pointBorderColor: '#0f1117',
+        pointBorderWidth: 2,
+        tension: 0.4,
+        fill: true
+      }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#6b7280', maxTicksLimit: 10 }, grid: { color: '#1e2133' } },
-        y: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } }
-      }
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#6b7280',
+          padding: 10,
+          callbacks: {
+            title: items => items[0].label,
+            label: item => `  RC: ${item.raw}`
+          }
+        }
+      },
+      scales: commonScales
     }
   });
 
-  snChartObj = new Chart(document.getElementById('snChart'), {
+  // Gradient für Siege/Niederlagen
+  const snCanvas = document.getElementById('snChart');
+  const snCtx = snCanvas.getContext('2d');
+  const sGrad = snCtx.createLinearGradient(0, 0, 0, snCanvas.offsetHeight || 220);
+  sGrad.addColorStop(0, 'rgba(74,222,128,0.2)');
+  sGrad.addColorStop(1, 'rgba(74,222,128,0.0)');
+  const nGrad = snCtx.createLinearGradient(0, 0, 0, snCanvas.offsetHeight || 220);
+  nGrad.addColorStop(0, 'rgba(248,113,113,0.2)');
+  nGrad.addColorStop(1, 'rgba(248,113,113,0.0)');
+
+  snChartObj = new Chart(snCanvas, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { data: siegeVals, borderColor: '#4ade80', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
-        { data: niedVals,  borderColor: '#f87171', borderWidth: 2, pointRadius: 3, tension: 0.3, fill: false },
+        {
+          label: 'Siege',
+          data: siegeVals,
+          borderColor: '#4ade80',
+          backgroundColor: sGrad,
+          borderWidth: 2.5,
+          pointRadius: siegeVals.length <= 20 ? 5 : 3,
+          pointBackgroundColor: '#4ade80',
+          pointBorderColor: '#0f1117',
+          pointBorderWidth: 2,
+          tension: 0.4,
+          fill: true
+        },
+        {
+          label: 'Niederlagen',
+          data: niedVals,
+          borderColor: '#f87171',
+          backgroundColor: nGrad,
+          borderWidth: 2.5,
+          pointRadius: niedVals.length <= 20 ? 5 : 3,
+          pointBackgroundColor: '#f87171',
+          pointBorderColor: '#0f1117',
+          pointBorderWidth: 2,
+          tension: 0.4,
+          fill: true
+        }
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#6b7280', maxTicksLimit: 10 }, grid: { color: '#1e2133' } },
-        y: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } }
-      }
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#6b7280', boxWidth: 12, font: { size: 12 } }
+        },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#6b7280',
+          padding: 10,
+        }
+      },
+      scales: commonScales
     }
   });
 

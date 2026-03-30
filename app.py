@@ -673,7 +673,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           {% for t in tabelle %}
           <tr data-kuerzel="{{ t.kürzel }}">
             <td class="center bold">{{ t.rang }}.</td>
-            <td>{{ t.name }}{% if t.ist_swer %} ★{% endif %}</td>
+            <td>{{ t.name }}{% if t.ist_swer %}{% endif %}</td>
             <td class="center">{{ t.sp }}</td>
             <td class="center green">{{ t.s }}</td>
             <td class="center muted">{{ t.u }}</td>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:oettv.xttv.at)",
+      "Bash(curl:*)",
+      "WebFetch(domain:www.ratingscentral.com)"
+    ]
+  }
+}

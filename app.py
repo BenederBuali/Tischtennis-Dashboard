@@ -19,11 +19,12 @@ app = Flask(__name__)
 
 # ─── Konfiguration ─────────────────────────────────────────────────────────────
 
-LIGA_ID     = 8297
+LIGA_ID_DEFAULT = 8297          # Bekannte Liga-ID als Startpunkt
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
 TEAM_KÜRZEL = "SWER"
 ENCODING    = "iso-8859-1"
 UPDATE_INTERVALL_STUNDEN = 4
+LIGA_ID_SUCHBEREICH = 30        # Wie viele IDs rund um die bekannte ID durchsuchen
 
 VERLAUF_PFAD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tt_verlauf.json")
@@ -44,6 +45,8 @@ _cache = {
     "verlauf":    [],
     "zuletzt":    None,
     "fehler":     None,
+    "liga_id":    LIGA_ID_DEFAULT,
+    "liga_name":  "",
 }
 _cache_lock = threading.Lock()
 
@@ -61,7 +64,48 @@ def safe_text(el) -> str:
 
 # ─── Scraper ────────────────────────────────────────────────────────────────────
 
-def lade_ligatabelle() -> list:
+def finde_aktuelle_liga_id(bekannte_id: int) -> tuple:
+    """
+    Prüft ob SWER noch in der bekannten Liga ist.
+    Falls nicht: sucht in benachbarten IDs (±LIGA_ID_SUCHBEREICH).
+    Gibt (liga_id, liga_name) zurück.
+    """
+    def enthaelt_swer(lid: int) -> tuple:
+        try:
+            soup = fetch(BASE_URL, {"lid": lid})
+            for row in soup.find_all("tr"):
+                zellen = row.find_all("td")
+                if len(zellen) < 4:
+                    continue
+                if zellen[1].get("data-msrangsort"):
+                    kürzel = safe_text(zellen[3]).strip()
+                    if TEAM_KÜRZEL.upper() in kürzel.upper():
+                        # Liga-Namen aus Seitentitel lesen
+                        titel = soup.find("title")
+                        name = safe_text(titel).strip() if titel else str(lid)
+                        return True, name
+        except Exception:
+            pass
+        return False, ""
+
+    # Zuerst bekannte ID prüfen
+    gefunden, name = enthaelt_swer(bekannte_id)
+    if gefunden:
+        return bekannte_id, name
+
+    print(f"SWER nicht in Liga {bekannte_id} – suche in benachbarten IDs...")
+    for offset in range(1, LIGA_ID_SUCHBEREICH + 1):
+        for kandidat in [bekannte_id + offset, bekannte_id - offset]:
+            gefunden, name = enthaelt_swer(kandidat)
+            if gefunden:
+                print(f"SWER gefunden in Liga {kandidat}: {name}")
+                return kandidat, name
+
+    print("SWER in keiner benachbarten Liga gefunden – behalte bekannte ID")
+    return bekannte_id, ""
+
+
+def lade_ligatabelle(liga_id: int = LIGA_ID_DEFAULT) -> list:
     """
     Mannschaftstabelle scrapen.
     XTTV-Struktur (15 Zellen pro Teamzeile, keine Links in der Zeile):
@@ -74,7 +118,7 @@ def lade_ligatabelle() -> list:
       td[11] Sz-V+  td[12] ":"  td[13] Sz-V-
       td[14] P
     """
-    soup = fetch(BASE_URL, {"lid": LIGA_ID})
+    soup = fetch(BASE_URL, {"lid": liga_id})
     tabelle = []
 
     for row in soup.find_all("tr"):
@@ -116,7 +160,7 @@ def lade_ligatabelle() -> list:
 
     return sorted(tabelle, key=lambda x: x["rang"])
 
-def lade_einzelrangliste() -> list:
+def lade_einzelrangliste(liga_id: int = LIGA_ID_DEFAULT) -> list:
     """
     Einzelrangliste scrapen – gewertete UND nicht-gewertete Spieler.
 
@@ -126,7 +170,7 @@ def lade_einzelrangliste() -> list:
     - Nicht-gewertete:   1. TD ist LEER oder enthält kein Rang-Muster,
                          aber Zeile hat trotzdem einen spid= Link
     """
-    soup = fetch(BASE_URL, {"lid": LIGA_ID})
+    soup = fetch(BASE_URL, {"lid": liga_id})
     spieler = []
     rang_fake = 9000  # Für nicht-gewertete: hoher Fake-Rang zum Sortieren
 
@@ -213,10 +257,10 @@ def lade_einzelrangliste() -> list:
     return spieler
 
 
-def lade_spiele() -> tuple:
+def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
     alle  = []
     jetzt = datetime.now()
-    soup  = fetch(BASE_URL, {"do": "spiele", "lid": LIGA_ID, "zeit": "alle"})
+    soup  = fetch(BASE_URL, {"do": "spiele", "lid": liga_id, "zeit": "alle"})
     for item in soup.select("li, tr"):
         text = safe_text(item)
         m = re.search(r"(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})", text)
@@ -383,9 +427,14 @@ def aktualisiere_daten():
     global _cache
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Lade Daten von XTTV...")
     try:
-        tabelle              = lade_ligatabelle()
-        rangliste            = lade_einzelrangliste()
-        vergangene, kuenftige = lade_spiele()
+        # Aktuelle Liga-ID ermitteln (erkennt Auf-/Abstieg automatisch)
+        with _cache_lock:
+            bekannte_id = _cache["liga_id"]
+        liga_id, liga_name = finde_aktuelle_liga_id(bekannte_id)
+
+        tabelle              = lade_ligatabelle(liga_id)
+        rangliste            = lade_einzelrangliste(liga_id)
+        vergangene, kuenftige = lade_spiele(liga_id)
         verlauf              = lade_verlauf()
 
         # RC-History Backfill: fehlende Spieler von RatingsCentral nachladen
@@ -401,11 +450,13 @@ def aktualisiere_daten():
             _cache["vergangene"] = vergangene
             _cache["kuenftige"]  = kuenftige
             _cache["verlauf"]    = verlauf
+            _cache["liga_id"]    = liga_id
+            _cache["liga_name"]  = liga_name
             _cache["zuletzt"]    = datetime.now().strftime("%d.%m.%Y %H:%M")
             _cache["fehler"]     = None
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Update OK – "
-              f"{len(tabelle)} Teams, {len(rangliste)} Spieler")
+              f"Liga {liga_id}, {len(tabelle)} Teams, {len(rangliste)} Spieler")
 
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Fehler: {e}")

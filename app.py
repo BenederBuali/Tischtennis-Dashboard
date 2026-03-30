@@ -22,7 +22,6 @@ app = Flask(__name__)
 LIGA_ID     = 8297
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
 TEAM_KÜRZEL = "SWER"
-MEIN_NAME   = "Beneder Nevio"
 ENCODING    = "iso-8859-1"
 UPDATE_INTERVALL_STUNDEN = 4
 
@@ -510,7 +509,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="tab" onclick="switchTab('rangliste')">Rangliste</div>
   <div class="tab" onclick="switchTab('tabelle')">Ligatabelle</div>
   <div class="tab" onclick="switchTab('spiele')">Spieltermine</div>
-  <div class="tab" onclick="switchTab('verlauf')">Mein Verlauf</div>
+  <div class="tab" onclick="switchTab('verlauf')">Verlauf</div>
 </div>
 
 <!-- ÜBERSICHT -->
@@ -681,7 +680,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
   <div id="verlaufInhalt">
     <p style="color:var(--muted); text-align:center; padding:3rem;">
-      ↑ Wähle deinen Namen um deinen Verlauf zu sehen
+      ↑ Spieler wählen um den Verlauf zu sehen
     </p>
   </div>
   <div id="verlaufDaten" style="display:none;">

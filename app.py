@@ -64,74 +64,57 @@ def safe_text(el) -> str:
 def lade_ligatabelle() -> list:
     """
     Mannschaftstabelle scrapen.
-    Auf XTTV hat jede Mannschaftszeile:
-    - Rang in erster Zelle ("1.")
-    - Mannschaftsname als Link mit title-Attribut (voller Name)
-    - Direkt danach: Kürzel-Link (z.B. "SWER2") MIT title-Attribut
-    Wir lesen BEIDE Links mit tid= — erster = Name-Link, zweiter = Kürzel-Link.
+    XTTV-Struktur (15 Zellen pro Teamzeile, keine Links in der Zeile):
+      td[0] img (Aufsteiger/Absteiger Icon)
+      td[1] Rang ("1.")  ← hat data-msrangsort Attribut
+      td[2] Mannschaftsname
+      td[3] Kürzel (z.B. "SWER2")
+      td[4] Sp  td[5] S  td[6] U  td[7] N
+      td[8] Sp-V+  td[9] ":"  td[10] Sp-V-
+      td[11] Sz-V+  td[12] ":"  td[13] Sz-V-
+      td[14] P
     """
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     tabelle = []
 
     for row in soup.find_all("tr"):
         zellen = row.find_all("td")
-        if len(zellen) < 6:
-            continue
-        texts = [safe_text(z) for z in zellen]
-
-        # Rang in einer der ersten 3 Zellen
-        rang = None
-        for t in texts[:3]:
-            clean = t.strip().rstrip(".")
-            if clean.isdigit() and 1 <= int(clean) <= 30:
-                rang = int(clean)
-                break
-        if rang is None:
+        if len(zellen) < 15:
             continue
 
-        # Alle Links mit tid= in dieser Zeile sammeln
-        tid_links = [a for a in row.find_all("a") if "tid=" in a.get("href", "")]
-        if not tid_links:
+        # Teamzeile erkennen: td[1] hat data-msrangsort Attribut
+        rang_cell = zellen[1]
+        if not rang_cell.get("data-msrangsort"):
             continue
 
-        # XTTV-Struktur: erster Link = langer Name, zweiter = Kürzel (z.B. SWER2)
-        # Beide haben das title-Attribut mit dem vollen Vereinsnamen
-        name   = tid_links[0].get("title", "") or safe_text(tid_links[0])
-        kürzel = safe_text(tid_links[1]) if len(tid_links) > 1 else safe_text(tid_links[0])
+        rang_text = safe_text(rang_cell).strip().rstrip(".")
+        if not rang_text.isdigit():
+            continue
+        rang = int(rang_text)
 
-        # Kürzel bereinigen: nur alphanumerisch, max 7 Zeichen
-        kürzel = kürzel.strip()[:7]
+        name   = safe_text(zellen[2]).strip()
+        kürzel = safe_text(zellen[3]).strip()
         if not kürzel:
             continue
 
-        # Nur positive ganze Zahlen (Sp, S, U, N, ..., P)
-        # Rang-Zahl aus der Liste entfernen (XTTV rendert Rang ohne Punkt)
-        nums = [int(t.strip()) for t in texts if t.strip().isdigit()]
-        if nums and nums[0] == rang:
-            nums = nums[1:]
-        if len(nums) < 5:
-            continue
+        def to_int(zelle):
+            t = safe_text(zelle).strip()
+            return int(t) if t.isdigit() else 0
 
         tabelle.append({
             "rang":     rang,
             "name":     name,
             "kürzel":   kürzel,
-            "sp":       nums[0],
-            "s":        nums[1],
-            "u":        nums[2],
-            "n":        nums[3],
-            "p":        nums[-1],
+            "sp":       to_int(zellen[4]),
+            "s":        to_int(zellen[5]),
+            "u":        to_int(zellen[6]),
+            "n":        to_int(zellen[7]),
+            "p":        to_int(zellen[14]),
             "ist_swer": TEAM_KÜRZEL.upper() in kürzel.upper() or
                         TEAM_KÜRZEL.upper() in name.upper(),
         })
 
-    # Deduplizieren und sortieren
-    seen, result = set(), []
-    for t in sorted(tabelle, key=lambda x: x["rang"]):
-        if t["kürzel"] not in seen:
-            seen.add(t["kürzel"])
-            result.append(t)
-    return result
+    return sorted(tabelle, key=lambda x: x["rang"])
 
 def lade_einzelrangliste() -> list:
     """

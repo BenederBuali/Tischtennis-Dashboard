@@ -572,7 +572,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
     .player-card { background: var(--bg3); border: 1px solid var(--border);
                    border-radius: var(--radius); padding: 12px;
-                   display: flex; align-items: center; gap: 10px; }
+                   display: flex; align-items: center; gap: 10px;
+                   transition: border-color 0.15s, background 0.15s; }
+    .player-card:hover { border-color: var(--accent); background: #1e2235; }
     .ich-card { border-color: var(--ich-border); background: var(--ich); }
     .player-avatar { width: 38px; height: 38px; border-radius: 50%;
                      background: var(--swer); border: 1px solid var(--swer-border);
@@ -756,7 +758,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card-title">SWER-Spieler in der Liga</div>
     <div class="player-grid">
       {% for s in swer_spieler %}
-      <div class="player-card ">
+      <div class="player-card" style="cursor:pointer;" onclick="oeffneVerlauf('{{ s.name }}')">
         <div class="player-avatar">{{ s.name.split()[0][0] }}{{ s.name.split()[-1][0] }}</div>
         <div>
           <div class="player-name">{{ s.name }}</div>
@@ -1301,8 +1303,20 @@ let snChartObj = null;
 function waehleSpieler(name) {
   localStorage.setItem('ttSpielerName', name);
   zeigeVerlauf(name);
-  // Rangliste neu highlighten
   highlightSpieler(name);
+}
+
+function oeffneVerlauf(name) {
+  // Tab wechseln
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-verlauf').classList.add('active');
+  document.querySelectorAll('.tab').forEach(t => { if (t.textContent.trim() === 'Verlauf') t.classList.add('active'); });
+  // Spieler setzen und anzeigen
+  const sel = document.getElementById('spielerSelect');
+  if (sel) sel.value = name;
+  waehleSpieler(name);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function highlightSpieler(name) {

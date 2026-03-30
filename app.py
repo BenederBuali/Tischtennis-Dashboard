@@ -63,26 +63,69 @@ def safe_text(el) -> str:
 # ─── Scraper ────────────────────────────────────────────────────────────────────
 
 def lade_ligatabelle() -> list:
+    """
+    Mannschaftstabelle scrapen.
+    XTTV-Struktur: jede Mannschaftszeile hat in der 1. TD einen Rang ("1."),
+    gefolgt von einem leeren Bild-TD, dann Mannschaftsname-TD mit Link,
+    Kürzel-TD mit Link, dann Sp/S/U/N, Spielverhältnis (Zahl : Zahl),
+    Satzverhältnis (Zahl : Zahl), Punkte.
+    Der Trick: wir nehmen nur Zeilen wo der erste <a>-Link ein tid= enthält.
+    """
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     tabelle = []
+    rang_counter = 0
+
     for row in soup.find_all("tr"):
+        # Muss mindestens einen Link mit tid= haben (Mannschaft)
+        mann_link = row.find("a", href=lambda h: h and "tid=" in (h or "") and "do=spiele" in (h or ""))
+        if not mann_link:
+            continue
+
         zellen = row.find_all("td")
-        if not zellen:
+        texts  = [safe_text(z) for z in zellen]
+        if len(texts) < 6:
             continue
-        texts = [safe_text(z) for z in zellen]
-        erste = texts[0].strip().rstrip(".")
-        if not erste.isdigit():
+
+        # Rang: erste Zelle die eine Zahl + Punkt enthält
+        rang = None
+        for t in texts[:3]:
+            clean = t.strip().rstrip(".")
+            if clean.isdigit():
+                rang = int(clean)
+                break
+        if rang is None:
             continue
-        links = row.find_all("a")
-        name   = safe_text(links[0]) if links else ""
-        kürzel = safe_text(links[1]) if len(links) > 1 else ""
+
+        # Name und Kürzel aus den Links
+        links_mit_tid = row.find_all("a", href=lambda h: h and "tid=" in (h or ""))
+        name   = safe_text(links_mit_tid[0]) if links_mit_tid else ""
+        kürzel = safe_text(links_mit_tid[1]) if len(links_mit_tid) > 1 else ""
+        # Fallback: Kürzel ist oft der 2. Link-Text (kurze Abkürzung)
+        if not kürzel or len(kürzel) > 6:
+            alle_links = row.find_all("a")
+            for lnk in alle_links:
+                txt = lnk.get_text(strip=True)
+                if 3 <= len(txt) <= 6 and txt.isupper():
+                    kürzel = txt
+                    break
+
         if not name:
             continue
-        nums = [int(t) for t in texts[2:] if t.strip().isdigit()]
+
+        # Alle positiven ganzzahligen Werte (Sp, S, U, N, SpV, SzV, P)
+        # Wichtig: Spielverhältnis-Zahlen NICHT als P interpretieren
+        # Wir nehmen: Sp=nums[0], S=nums[1], U=nums[2], N=nums[3], P=nums[-1]
+        nums = []
+        for t in texts:
+            t2 = t.strip()
+            if t2.isdigit():
+                nums.append(int(t2))
+
         if len(nums) < 5:
             continue
+
         tabelle.append({
-            "rang":     int(erste),
+            "rang":     rang,
             "name":     name,
             "kürzel":   kürzel,
             "sp":       nums[0],
@@ -93,58 +136,87 @@ def lade_ligatabelle() -> list:
             "ist_swer": TEAM_KÜRZEL.upper() in kürzel.upper() or
                         TEAM_KÜRZEL.upper() in name.upper(),
         })
+
     return tabelle
 
 
 def lade_einzelrangliste() -> list:
+    """
+    Einzelrangliste scrapen – gewertete UND nicht-gewertete Spieler.
+
+    XTTV-Struktur:
+    - Gewertete Spieler: 1. TD = "N." (Rang), dann Spieler-Link, PassNr, Verein-Link,
+                         Einsätze, Siege, ":", Niederlagen, RC-Link, ±, Abweichung, AK
+    - Nicht-gewertete:   1. TD ist LEER oder enthält kein Rang-Muster,
+                         aber Zeile hat trotzdem einen spid= Link
+    """
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     spieler = []
+    rang_fake = 9000  # Für nicht-gewertete: hoher Fake-Rang zum Sortieren
+
     for row in soup.find_all("tr"):
-        zellen = row.find_all("td")
-        if not zellen:
-            continue
-        texts = [safe_text(z) for z in zellen]
-        rang_text = texts[0].strip().rstrip(".")
-        if not rang_text.isdigit():
-            continue
+        # Muss Spieler-Link haben
         spieler_link = row.find("a", href=lambda h: h and "spid=" in h and "uebersicht=" in h)
         if not spieler_link:
             continue
+
         name = safe_text(spieler_link)
-        if not name:
+        if not name or len(name) < 3:
             continue
-        verein_link = row.find("a", href=lambda h: h and "tid=" in (h or ""))
+
+        zellen = row.find_all("td")
+        texts  = [safe_text(z) for z in zellen]
+        if not texts:
+            continue
+
+        # Rang bestimmen
+        rang_text  = texts[0].strip().rstrip(".")
+        nicht_gewertet = False
+        if rang_text.isdigit():
+            rang = int(rang_text)
+        else:
+            # Nicht-gewertet: erste Zelle leer oder kein Rang
+            nicht_gewertet = True
+            rang = rang_fake
+            rang_fake += 1
+
+        # Verein
+        verein_link = row.find("a", href=lambda h: h and "tid=" in (h or "") and "do=spiele" not in (h or ""))
         verein = safe_text(verein_link) if verein_link else ""
-        try:
-            einsätze = int(texts[4]) if len(texts) > 4 and texts[4].isdigit() else 0
-        except ValueError:
-            einsätze = 0
+
+        # Einsätze: 5. Zelle (Index 4), muss reine Zahl sein
+        einsätze = 0
+        if len(texts) > 4 and texts[4].isdigit():
+            einsätze = int(texts[4])
+
+        # Siege und Niederlagen: Zelle mit ":" dazwischen
         s, n = 0, 0
         for i, t in enumerate(texts):
-            if t == ":" and 0 < i < len(texts) - 1:
+            if t.strip() == ":" and 0 < i < len(texts) - 1:
                 try:
                     s = int(texts[i - 1])
                     n = int(texts[i + 1])
                     break
                 except ValueError:
                     pass
+
+        # RC-Rating: Link zu ratingscentral, Text = vierstellige Zahl
         rc = ""
         rc_link = row.find("a", href=lambda h: h and "ratingscentral" in (h or ""))
         if rc_link:
-            rc_text = safe_text(rc_link)
-            if rc_text.isdigit():
+            rc_text = rc_link.get_text(strip=True)
+            if rc_text.isdigit() and len(rc_text) in (3, 4):
                 rc = rc_text
+        # Fallback: erste 3-4-stellige Zahl > 500 in den Zellen
         if not rc:
             for t in texts:
-                if t.isdigit() and len(t) == 4 and int(t) > 500:
-                    rc = t
+                t2 = t.strip()
+                if t2.isdigit() and 3 <= len(t2) <= 4 and int(t2) > 500:
+                    rc = t2
                     break
-        # Nicht-gewertet: kein Rang (rang_text == "-" oder rang > 900)
-        # XTTV zeigt nicht-gewertete Spieler ohne Rang-Nummer
-        nicht_gewertet = int(rang_text) > 900
 
         spieler.append({
-            "rang":           int(rang_text),
+            "rang":           rang,
             "name":           name,
             "verein":         verein,
             "einsätze":       einsätze,
@@ -156,6 +228,7 @@ def lade_einzelrangliste() -> list:
             "win_pct":        round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
             "nicht_gewertet": nicht_gewertet,
         })
+
     return spieler
 
 

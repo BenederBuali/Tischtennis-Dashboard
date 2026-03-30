@@ -547,7 +547,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- RANGLISTE -->
 <div id="tab-rangliste" class="tab-content">
   <div class="card">
-    <div class="card-title">Einzelrangliste Top 30 (SWER = blau, du = grün)</div>
+    <div class="card-title">Einzelrangliste (SWER = blau, ausgewählter Spieler = grün)</div>
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -556,15 +556,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <th>Win-Rate</th><th class="center">RC</th>
         </tr></thead>
         <tbody>
-          {% for s in rangliste[:35] %}
+          {% set ns = namespace(trenner_gezeigt=false) %}
+          {% for s in rangliste %}
+          {% if s.nicht_gewertet and not ns.trenner_gezeigt %}
+            {% set ns.trenner_gezeigt = true %}
+            <tr><td colspan="8" style="padding:6px 10px; font-size:11px; font-weight:600;
+                text-transform:uppercase; letter-spacing:0.08em; color:var(--muted);
+                background:var(--bg); border-bottom:1px solid var(--border);">
+              Nicht gewertet
+            </td></tr>
+          {% endif %}
           <tr class="{% if s.ist_swer %}swer-row{% endif %}{% if s.nicht_gewertet %} ng-row{% endif %}"
               data-name="{{ s.name }}" data-verein="{{ s.verein }}">
             <td class="center muted">
-              {% if s.nicht_gewertet %}<span title="Nicht gewertet" style="color:#f87171;">–</span>{% else %}{{ s.rang }}.{% endif %}
+              {% if s.nicht_gewertet %}<span title="Nicht gewertet" style="color:var(--muted);">–</span>{% else %}{{ s.rang }}.{% endif %}
             </td>
-            <td class="bold">
-              {{ s.name }}{% if s.nicht_gewertet %} <span style="font-size:11px;color:#f87171;font-weight:400;">(n.g.)</span>{% endif %}
-            </td>
+            <td class="bold">{{ s.name }}</td>
             <td class="center">{{ s.verein }}</td>
             <td class="center">{{ s.einsaetze }}</td>
             <td class="center green">{{ s.siege }}</td>

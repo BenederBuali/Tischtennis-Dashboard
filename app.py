@@ -4,7 +4,7 @@ TT Dashboard – Flask Web-App
 Scrapt XTTV automatisch alle 4 Stunden und stellt das Dashboard
 als Website bereit. Läuft auf Railway (kostenlos).
 """
-
+ 
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -14,29 +14,29 @@ import threading
 import time
 from datetime import datetime
 from flask import Flask, render_template_string, jsonify
-
+ 
 app = Flask(__name__)
-
+ 
 # ─── Konfiguration ─────────────────────────────────────────────────────────────
-
+ 
 LIGA_ID     = 8297
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
 TEAM_KÜRZEL = "SWER"
 MEIN_NAME   = "Beneder Nevio"
 ENCODING    = "iso-8859-1"
 UPDATE_INTERVALL_STUNDEN = 4
-
+ 
 VERLAUF_PFAD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tt_verlauf.json")
-
+ 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/122.0.0.0 Safari/537.36"
 }
-
+ 
 # ─── Globaler Daten-Cache ───────────────────────────────────────────────────────
-
+ 
 _cache = {
     "tabelle":    [],
     "rangliste":  [],
@@ -47,21 +47,21 @@ _cache = {
     "fehler":     None,
 }
 _cache_lock = threading.Lock()
-
+ 
 # ─── Scraping-Hilfsfunktionen ──────────────────────────────────────────────────
-
+ 
 def fetch(url: str, params: dict = None) -> BeautifulSoup:
     r = requests.get(url, params=params, headers=HEADERS, timeout=15)
     r.encoding = ENCODING
     return BeautifulSoup(r.text, "html.parser")
-
+ 
 def safe_text(el) -> str:
     if el is None:
         return ""
     return el.get_text(separator=" ", strip=True)
-
+ 
 # ─── Scraper ────────────────────────────────────────────────────────────────────
-
+ 
 def lade_ligatabelle() -> list:
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     tabelle = []
@@ -94,8 +94,8 @@ def lade_ligatabelle() -> list:
                         TEAM_KÜRZEL.upper() in name.upper(),
         })
     return tabelle
-
-
+ 
+ 
 def lade_einzelrangliste() -> list:
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     spieler = []
@@ -152,8 +152,8 @@ def lade_einzelrangliste() -> list:
             "win_pct":  round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
         })
     return spieler
-
-
+ 
+ 
 def lade_spiele() -> tuple:
     alle  = []
     jetzt = datetime.now()
@@ -197,9 +197,9 @@ def lade_spiele() -> tuple:
     for s in unique:
         del s["_dt"]
     return vergangene, kuenftige
-
+ 
 # ─── Verlauf ────────────────────────────────────────────────────────────────────
-
+ 
 def lade_verlauf() -> list:
     if not os.path.exists(VERLAUF_PFAD):
         return []
@@ -208,7 +208,7 @@ def lade_verlauf() -> list:
             return json.load(f)
     except Exception:
         return []
-
+ 
 def speichere_verlauf(verlauf: list, rc: str, siege: int, niederl: int) -> list:
     if not rc or not rc.isdigit():
         return verlauf
@@ -236,9 +236,9 @@ def speichere_verlauf(verlauf: list, rc: str, siege: int, niederl: int) -> list:
     except Exception as e:
         print(f"Verlauf-Speicherfehler: {e}")
     return verlauf
-
+ 
 # ─── Cache-Updater ──────────────────────────────────────────────────────────────
-
+ 
 def aktualisiere_daten():
     global _cache
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Lade Daten von XTTV...")
@@ -247,11 +247,11 @@ def aktualisiere_daten():
         rangliste            = lade_einzelrangliste()
         vergangene, kuenftige = lade_spiele()
         verlauf              = lade_verlauf()
-
+ 
         ich = next((s for s in rangliste if s["ist_ich"]), None)
         if ich:
             verlauf = speichere_verlauf(verlauf, ich["rc"], ich["siege"], ich["niederl"])
-
+ 
         with _cache_lock:
             _cache["tabelle"]    = tabelle
             _cache["rangliste"]  = rangliste
@@ -260,25 +260,25 @@ def aktualisiere_daten():
             _cache["verlauf"]    = verlauf
             _cache["zuletzt"]    = datetime.now().strftime("%d.%m.%Y %H:%M")
             _cache["fehler"]     = None
-
+ 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Update OK – "
               f"{len(tabelle)} Teams, {len(rangliste)} Spieler")
-
+ 
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Fehler: {e}")
         with _cache_lock:
             _cache["fehler"] = str(e)
-
-
+ 
+ 
 def hintergrund_updater():
     """Läuft als Thread und aktualisiert alle N Stunden."""
     while True:
         aktualisiere_daten()
         time.sleep(UPDATE_INTERVALL_STUNDEN * 3600)
-
-
+ 
+ 
 # ─── HTML-Template ──────────────────────────────────────────────────────────────
-
+ 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -298,7 +298,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
     body { background: var(--bg); color: var(--text);
            font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
-
+ 
     header { background: var(--bg2); border-bottom: 1px solid var(--border);
              padding: 14px 20px; display: flex; align-items: center;
              justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -309,9 +309,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                    color: var(--muted); padding: 5px 12px; border-radius: 6px;
                    cursor: pointer; font-size: 12px; }
     .refresh-btn:hover { color: var(--text); border-color: var(--accent); }
-
+ 
     .container { max-width: 1100px; margin: 0 auto; padding: 20px 14px; }
-
+ 
     .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
                margin-bottom: 20px; overflow-x: auto; }
     .tab { padding: 8px 16px; border-radius: var(--radius) var(--radius) 0 0;
@@ -322,19 +322,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .tab.active { color: var(--text); background: var(--bg2); border-color: var(--border); }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-
+ 
     .card { background: var(--bg2); border: 1px solid var(--border);
             border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
     .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase;
                   letter-spacing: 0.08em; color: var(--muted); margin-bottom: 14px; }
-
+ 
     .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                   gap: 10px; margin-bottom: 16px; }
     .metric { background: var(--bg3); border-radius: var(--radius); padding: 12px 14px; }
     .metric-label { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
     .metric-value { font-size: 20px; font-weight: 600; }
     .metric-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
-
+ 
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; padding: 7px 10px; font-size: 11px; font-weight: 600;
@@ -347,21 +347,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .swer-row:hover td { background: #204570 !important; }
     .ich-row td { background: var(--ich) !important; }
     .ich-row:hover td { background: #1f3f1f !important; }
-
+ 
     .center { text-align: center; }
     .bold { font-weight: 600; }
     .mono { font-family: 'Consolas', monospace; }
     .muted { color: var(--muted); }
     .green { color: var(--green); font-weight: 600; }
     .red { color: var(--red); }
-
+ 
     .win-bar-wrap { position: relative; height: 16px; background: var(--bg3);
                     border-radius: 99px; min-width: 70px; overflow: hidden; }
     .win-bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
                     border-radius: 99px; opacity: 0.7; }
     .win-bar-label { position: absolute; right: 5px; top: 50%;
                      transform: translateY(-50%); font-size: 11px; font-weight: 600; }
-
+ 
     .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
     .player-card { background: var(--bg3); border: 1px solid var(--border);
                    border-radius: var(--radius); padding: 12px;
@@ -378,18 +378,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .stat-loss { color: var(--red); }
     .stat-sep  { color: var(--muted); margin: 0 2px; }
     .stat-pct  { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
-
+ 
     .chart-wrap { position: relative; height: 260px; }
-
+ 
     .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px;
               color: var(--muted); margin-top: 8px; }
     .legend span { display: flex; align-items: center; gap: 4px; }
     .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-
+ 
     .error-banner { background: #3a1a1a; border: 1px solid var(--red);
                     border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
                     color: var(--red); font-size: 13px; }
-
+ 
     /* Mobile */
     @media (max-width: 600px) {
       header h1 { font-size: 14px; }
@@ -399,7 +399,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </style>
 </head>
 <body>
-
+ 
 <header>
   <h1>🏓 TT Dashboard – <span>ASKö Schwertberg</span></h1>
   <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -407,13 +407,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="refresh-btn" onclick="location.reload()">↻ Aktualisieren</button>
   </div>
 </header>
-
+ 
 <div class="container">
-
+ 
 {% if fehler %}
 <div class="error-banner">⚠ Fehler beim letzten Datenladen: {{ fehler }}</div>
 {% endif %}
-
+ 
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('uebersicht')">Übersicht</div>
   <div class="tab" onclick="switchTab('rangliste')">Rangliste</div>
@@ -421,7 +421,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="tab" onclick="switchTab('spiele')">Spieltermine</div>
   <div class="tab" onclick="switchTab('verlauf')">Mein Verlauf</div>
 </div>
-
+ 
 <!-- ÜBERSICHT -->
 <div id="tab-uebersicht" class="tab-content active">
   <div class="card">
@@ -453,7 +453,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-
+ 
 <!-- RANGLISTE -->
 <div id="tab-rangliste" class="tab-content">
   <div class="card">
@@ -489,7 +489,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-
+ 
 <!-- LIGATABELLE -->
 <div id="tab-tabelle" class="tab-content">
   <div class="card">
@@ -518,7 +518,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-
+ 
 <!-- SPIELTERMINE -->
 <div id="tab-spiele" class="tab-content">
   <div class="card">
@@ -565,7 +565,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-
+ 
 <!-- MEIN VERLAUF -->
 <div id="tab-verlauf" class="tab-content">
   <div class="metric-row">
@@ -632,9 +632,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-
+ 
 </div><!-- /container -->
-
+ 
 <script>
 function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -642,12 +642,12 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   event.target.classList.add('active');
 }
-
+ 
 // Balken-Chart SWER Spieler
 const swernamen  = {{ chart_namen|safe }};
 const swersiege  = {{ chart_siege|safe }};
 const swernied   = {{ chart_niederl|safe }};
-
+ 
 new Chart(document.getElementById('barChart'), {
   type: 'bar',
   data: {
@@ -666,13 +666,13 @@ new Chart(document.getElementById('barChart'), {
     }
   }
 });
-
+ 
 // Verlauf-Charts
 const vLabels  = {{ verlauf_labels|safe }};
 const vRC      = {{ verlauf_rc|safe }};
 const vSiege   = {{ verlauf_siege|safe }};
 const vNied    = {{ verlauf_niederl|safe }};
-
+ 
 if (vLabels.length > 0) {
   new Chart(document.getElementById('verlaufChart'), {
     type: 'line',
@@ -718,24 +718,24 @@ if (vLabels.length > 0) {
 </body>
 </html>
 """
-
+ 
 # ─── Flask-Route ────────────────────────────────────────────────────────────────
-
+ 
 @app.route("/")
 def index():
     with _cache_lock:
         data = dict(_cache)
-
+ 
     rangliste  = data["rangliste"]
     verlauf    = data["verlauf"]
     swer_spieler = [s for s in rangliste if s["ist_swer"]]
-
+ 
     # Umlaute im Template-Kontext sicher machen (einsätze → einsaetze)
     for s in rangliste:
         s["einsaetze"] = s.get("einsätze", 0)
     for s in swer_spieler:
         s["einsaetze"] = s.get("einsätze", 0)
-
+ 
     # Verlauf-Kennzahlen
     letzter_rc    = verlauf[-1]["rc"] if verlauf else "–"
     vorheriger_rc = verlauf[-2]["rc"] if len(verlauf) >= 2 else (letzter_rc if letzter_rc != "–" else 0)
@@ -743,7 +743,7 @@ def index():
     rc_diff_str   = (f"+{rc_diff}" if rc_diff > 0 else str(rc_diff)) if rc_diff != 0 else "±0"
     rc_diff_color = "#4ade80" if rc_diff > 0 else "#f87171" if rc_diff < 0 else "#6b7280"
     erster_eintrag = verlauf[0]["datum"] if verlauf else "–"
-
+ 
     # Chart-Daten
     chart_namen   = json.dumps([s["name"].split()[0] for s in swer_spieler])
     chart_siege   = json.dumps([s["siege"]   for s in swer_spieler])
@@ -752,7 +752,7 @@ def index():
     verlauf_rc_js   = json.dumps([e["rc"]      for e in verlauf])
     verlauf_siege   = json.dumps([e["siege"]   for e in verlauf])
     verlauf_niederl = json.dumps([e["niederl"] for e in verlauf])
-
+ 
     return render_template_string(
         HTML_TEMPLATE,
         tabelle       = data["tabelle"],
@@ -775,8 +775,8 @@ def index():
         verlauf_siege   = verlauf_siege,
         verlauf_niederl = verlauf_niederl,
     )
-
-
+ 
+ 
 @app.route("/api/status")
 def status():
     with _cache_lock:
@@ -785,15 +785,32 @@ def status():
             "spieler":  len(_cache["rangliste"]),
             "fehler":   _cache["fehler"],
         })
-
-
+ 
+ 
+ 
+ 
 # ─── Start ──────────────────────────────────────────────────────────────────────
-
+ 
+_thread_gestartet = False
+_thread_lock = threading.Lock()
+ 
+def starte_hintergrund_thread():
+    """Thread einmalig starten – thread-safe."""
+    global _thread_gestartet
+    with _thread_lock:
+        if not _thread_gestartet:
+            _thread_gestartet = True
+            t = threading.Thread(target=hintergrund_updater, daemon=True)
+            t.start()
+ 
+ 
+@app.before_request
+def sicherstelle_thread():
+    """Beim ersten Request den Updater-Thread starten (funktioniert mit gunicorn)."""
+    starte_hintergrund_thread()
+ 
+ 
 if __name__ == "__main__":
-    # Beim Start sofort Daten laden, dann Hintergrund-Thread starten
-    t = threading.Thread(target=hintergrund_updater, daemon=True)
-    t.start()
-    # Kurz warten bis erster Load durch ist
-    time.sleep(2)
+    starte_hintergrund_thread()
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)

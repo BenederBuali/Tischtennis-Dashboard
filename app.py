@@ -624,15 +624,61 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     width:100%; max-width:280px; outline:none; }
     .search-input:focus { border-color:var(--accent); }
 
+    /* Loading Overlay */
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(15,17,23,0.88); backdrop-filter: blur(4px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; transition: opacity 0.2s;
+    }
+    .loading-spinner {
+      width: 46px; height: 46px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-size: 14px; color: var(--muted); }
+
+    /* Fehlerseite / Ladeseite */
+    .status-page { text-align: center; padding: 5rem 1rem; }
+    .status-page-icon { font-size: 52px; margin-bottom: 16px; }
+    .status-page-title { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+    .status-page-msg { font-size: 13px; color: var(--muted); max-width: 480px;
+                       margin: 0 auto 24px; line-height: 1.6; }
+    .status-page-btn { background: var(--accent); color: #fff; border: none;
+                       padding: 10px 26px; border-radius: 8px; font-size: 14px;
+                       cursor: pointer; font-weight: 600; }
+    .status-page-btn:hover { opacity: 0.85; }
+
+    /* Mobile: Spalten ausblenden */
+    @media (max-width: 520px) { .hide-mobile { display: none !important; } }
+
     /* Mobile */
     @media (max-width: 600px) {
+      header { padding: 10px 12px; gap: 8px; }
       header h1 { font-size: 14px; }
+      header > div { gap: 6px; }
+      select#mannschaftSelect { font-size: 12px; padding: 4px 8px; max-width: 160px; }
       .metric-value { font-size: 17px; }
+      .metric-row { grid-template-columns: repeat(2, 1fr); }
       td, th { padding: 6px 7px; font-size: 12px; }
+      .player-grid { grid-template-columns: 1fr; }
+      .chart-wrap { height: 200px; }
+      .next-game { padding: 12px 14px; gap: 8px; }
+      .next-game-teams { font-size: 14px; }
+      .next-game-badge { margin-left: 0; font-size: 11px; padding: 4px 10px; }
+      .search-input { max-width: 100%; }
+      .tab { padding: 6px 11px; font-size: 12px; }
+      .win-bar-wrap { min-width: 50px; }
     }
   </style>
 </head>
 <body>
+
+<div id="loadingOverlay" class="loading-overlay" style="display:none;">
+  <div class="loading-spinner"></div>
+  <div class="loading-text" id="loadingText">Wird geladen…</div>
+</div>
 
 <header>
   <h1>🏓 <span>ASKö Schwertberg</span> TT Dashboard</h1>
@@ -647,14 +693,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       {% endfor %}
     </select>
     <div class="update-time">Stand: {{ zuletzt }} Uhr</div>
-    <button class="refresh-btn" onclick="location.reload()">↻ Aktualisieren</button>
+    <button class="refresh-btn" onclick="zeigeLoader('Daten werden aktualisiert…'); location.reload()">↻ Aktualisieren</button>
   </div>
 </header>
 
 <div class="container">
 
+{% if fehler and not tabelle %}
+<div class="status-page">
+  <div class="status-page-icon">⚠️</div>
+  <div class="status-page-title" style="color:var(--red);">Fehler beim Laden</div>
+  <div class="status-page-msg">{{ fehler }}<br><br>XTTV ist möglicherweise nicht erreichbar. Bitte versuche es in einigen Minuten erneut.</div>
+  <button class="status-page-btn" onclick="zeigeLoader('Wird neu geladen…'); location.reload()">↻ Erneut versuchen</button>
+</div>
+{% elif not tabelle %}
+<div class="status-page">
+  <div class="status-page-icon">⏳</div>
+  <div class="status-page-title" style="color:var(--accent);">Daten werden geladen…</div>
+  <div class="status-page-msg">Der Server lädt gerade die Daten von XTTV.<br>Das dauert beim ersten Start ca. 15–30 Sekunden.</div>
+  <button class="status-page-btn" onclick="zeigeLoader('Wird neu geladen…'); location.reload()">↻ Neu laden</button>
+</div>
+<script>setTimeout(() => location.reload(), 10000);</script>
+{% else %}
+
 {% if fehler %}
-<div class="error-banner">⚠ Fehler beim letzten Datenladen: {{ fehler }}</div>
+<div class="error-banner">⚠ Letztes Update fehlgeschlagen: {{ fehler }} – Daten könnten veraltet sein.</div>
 {% endif %}
 
 <div class="tab-bar">
@@ -732,8 +795,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <table>
         <thead><tr>
           <th class="center">#</th><th>Name</th><th class="center">Verein</th>
-          <th class="center">Eins.</th><th class="center">S</th><th class="center">N</th>
-          <th>Win-Rate</th><th class="center">RC</th>
+          <th class="center hide-mobile">Eins.</th><th class="center">S</th><th class="center">N</th>
+          <th class="hide-mobile">Win-Rate</th><th class="center">RC</th>
         </tr></thead>
         <tbody>
           {% set ns = namespace(trenner_gezeigt=false) %}
@@ -753,10 +816,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </td>
             <td class="bold">{{ s.name }}</td>
             <td class="center">{{ s.verein }}</td>
-            <td class="center">{{ s.einsaetze }}</td>
+            <td class="center hide-mobile">{{ s.einsaetze }}</td>
             <td class="center green">{{ s.siege }}</td>
             <td class="center red">{{ s.niederl }}</td>
-            <td>
+            <td class="hide-mobile">
               <div class="win-bar-wrap">
                 <div class="win-bar-fill" style="width:{{ [s.win_pct, 100]|min }}%;
                   background:{% if s.win_pct >= 70 %}#4ade80{% elif s.win_pct >= 50 %}#60a5fa{% else %}#f87171{% endif %};
@@ -781,17 +844,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <table>
         <thead><tr>
           <th class="center">#</th><th>Mannschaft</th>
-          <th class="center">Sp</th><th class="center">S</th>
-          <th class="center">U</th><th class="center">N</th><th class="center">P</th>
+          <th class="center hide-mobile">Sp</th><th class="center">S</th>
+          <th class="center hide-mobile">U</th><th class="center">N</th><th class="center">P</th>
         </tr></thead>
         <tbody>
           {% for t in tabelle %}
           <tr data-kuerzel="{{ t.kürzel }}">
             <td class="center bold">{{ t.rang }}.</td>
             <td>{{ t.name }}{% if t.ist_swer %}{% endif %}</td>
-            <td class="center">{{ t.sp }}</td>
+            <td class="center hide-mobile">{{ t.sp }}</td>
             <td class="center green">{{ t.s }}</td>
-            <td class="center muted">{{ t.u }}</td>
+            <td class="center muted hide-mobile">{{ t.u }}</td>
             <td class="center red">{{ t.n }}</td>
             <td class="center bold">{{ t.p }}</td>
           </tr>
@@ -808,13 +871,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card-title">Nächste Spiele</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th></tr></thead>
+        <thead><tr><th>Datum</th><th class="hide-mobile">Zeit</th><th>Heim</th><th></th><th>Gast</th></tr></thead>
         <tbody>
           {% if kuenftige %}
             {% for sp in kuenftige %}
             <tr data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
               <td class="mono">{{ sp.datum }}</td>
-              <td class="mono muted">{{ sp.zeit }}</td>
+              <td class="mono muted hide-mobile">{{ sp.zeit }}</td>
               <td class="bold">{{ sp.heim }}</td>
               <td class="center muted">vs</td>
               <td class="bold">{{ sp.gast }}</td>
@@ -831,12 +894,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card-title">Letzte Spiele</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th></tr></thead>
+        <thead><tr><th>Datum</th><th class="hide-mobile">Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th></tr></thead>
         <tbody>
           {% for sp in vergangene[-15:]|reverse %}
           <tr data-heim="{{ sp.heim }}" data-gast="{{ sp.gast }}">
             <td class="mono">{{ sp.datum }}</td>
-            <td class="mono muted">{{ sp.zeit }}</td>
+            <td class="mono muted hide-mobile">{{ sp.zeit }}</td>
             <td class="bold">{{ sp.heim }}</td>
             <td class="center muted">vs</td>
             <td class="bold">{{ sp.gast }}</td>
@@ -881,7 +944,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="card-title">Kommende Spiele</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th></tr></thead>
+          <thead><tr><th>Datum</th><th class="hide-mobile">Zeit</th><th>Heim</th><th></th><th>Gast</th></tr></thead>
           <tbody id="tsKuenftigBody"></tbody>
         </table>
       </div>
@@ -890,7 +953,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="card-title">Gespielte Spiele</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th><th class="center">S/U/N</th></tr></thead>
+          <thead><tr><th>Datum</th><th class="hide-mobile">Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th><th class="center">S/U/N</th></tr></thead>
           <tbody id="tsVergBody"></tbody>
         </table>
       </div>
@@ -965,9 +1028,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div><!-- /verlaufDaten -->
 </div>
 
+{% endif %}{# end if tabelle #}
+
 </div><!-- /container -->
 
 <script>
+// ── Lade-Overlay ──
+function zeigeLoader(text) {
+  const o = document.getElementById('loadingOverlay');
+  const t = document.getElementById('loadingText');
+  if (t && text) t.textContent = text;
+  if (o) o.style.display = 'flex';
+}
+window.addEventListener('beforeunload', () => zeigeLoader('Wird geladen…'));
+
 // ── Mannschafts-Auswahl ──
 const alleMannschaften = {{ alle_kuerzel|safe }};
 
@@ -1133,7 +1207,7 @@ function zeigeTeamSpiele(kuerzel) {
   kBody.innerHTML = kuenftig.length
     ? kuenftig.map(s => `<tr>
         <td class="mono">${s.datum}</td>
-        <td class="mono muted">${s.zeit}</td>
+        <td class="mono muted hide-mobile">${s.zeit}</td>
         <td class="bold ${s.heim.toUpperCase()===k?'':'muted'}">${s.heim}</td>
         <td class="center muted">vs</td>
         <td class="bold ${s.gast.toUpperCase()===k?'':'muted'}">${s.gast}</td>
@@ -1156,7 +1230,7 @@ function zeigeTeamSpiele(kuerzel) {
         }
         return `<tr>
           <td class="mono">${s.datum}</td>
-          <td class="mono muted">${s.zeit}</td>
+          <td class="mono muted hide-mobile">${s.zeit}</td>
           <td class="bold ${istHeim?'':'muted'}">${s.heim}</td>
           <td class="center muted">vs</td>
           <td class="bold ${!istHeim?'':'muted'}">${s.gast}</td>

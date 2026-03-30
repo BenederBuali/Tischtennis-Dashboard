@@ -842,6 +842,7 @@ def index():
     verlauf_rc_js   = json.dumps([e["rc"]      for e in verlauf])
     verlauf_siege   = json.dumps([e["siege"]   for e in verlauf])
     verlauf_niederl = json.dumps([e["niederl"] for e in verlauf])
+    verlauf_alle_js = json.dumps(verlauf)
 
     return render_template_string(
         HTML_TEMPLATE,

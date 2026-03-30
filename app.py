@@ -626,6 +626,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="tab" onclick="switchTab('rangliste')">Rangliste</div>
   <div class="tab" onclick="switchTab('tabelle')">Ligatabelle</div>
   <div class="tab" onclick="switchTab('spiele')">Spieltermine</div>
+  <div class="tab" onclick="switchTab('teamspiele')">Team Spiele</div>
   <div class="tab" onclick="switchTab('verlauf')">Verlauf</div>
 </div>
 
@@ -786,6 +787,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- TEAM SPIELE -->
+<div id="tab-teamspiele" class="tab-content">
+  <div class="card" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div class="card-title" style="margin-bottom:4px;">Saison-Bilanz</div>
+        <div id="tsTeamName" style="font-size:15px; font-weight:600; color:var(--accent);">– Mannschaft wählen –</div>
+      </div>
+      <div class="metric-row" style="margin:0; flex:1;">
+        <div class="metric"><div class="metric-label">Spiele</div><div class="metric-value" id="tsSp">–</div></div>
+        <div class="metric"><div class="metric-label">Siege</div><div class="metric-value green" id="tsS">–</div></div>
+        <div class="metric"><div class="metric-label">Unentschieden</div><div class="metric-value muted" id="tsU">–</div></div>
+        <div class="metric"><div class="metric-label">Niederlagen</div><div class="metric-value red" id="tsN">–</div></div>
+        <div class="metric"><div class="metric-label">Punkte</div><div class="metric-value" style="color:var(--accent);" id="tsP">–</div></div>
+      </div>
+    </div>
+  </div>
+  <div id="tsKeinTeam" style="color:var(--muted); text-align:center; padding:3rem;">
+    ↑ Wähle oben eine Mannschaft um alle Spiele zu sehen
+  </div>
+  <div id="tsInhalt" style="display:none;">
+    <div class="card">
+      <div class="card-title">Kommende Spiele</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th></tr></thead>
+          <tbody id="tsKuenftigBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Gespielte Spiele</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Datum</th><th>Zeit</th><th>Heim</th><th></th><th>Gast</th><th class="center">Ergebnis</th><th class="center">S/U/N</th></tr></thead>
+          <tbody id="tsVergBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MEIN VERLAUF -->
 <div id="tab-verlauf" class="tab-content">
   <div class="card" style="margin-bottom:16px;">
@@ -862,6 +905,7 @@ const alleMannschaften = {{ alle_kuerzel|safe }};
 function waehleMannschaft(kuerzel) {
   localStorage.setItem('ttMannschaft', kuerzel);
   highlightMannschaft(kuerzel);
+  zeigeTeamSpiele(kuerzel);
 }
 
 function highlightMannschaft(kuerzel) {
@@ -926,6 +970,104 @@ new Chart(document.getElementById('barChart'), {
     }
   }
 });
+
+// ── Team Spiele ──
+const alleSpiele = {{ alle_spiele|safe }};
+
+function zeigeTeamSpiele(kuerzel) {
+  const k = (kuerzel || '').trim().toUpperCase();
+  const keinTeam = document.getElementById('tsKeinTeam');
+  const inhalt   = document.getElementById('tsInhalt');
+
+  if (!k) {
+    keinTeam.style.display = '';
+    inhalt.style.display = 'none';
+    return;
+  }
+
+  const spiele = alleSpiele.filter(s => {
+    const h = (s.heim || '').toUpperCase();
+    const g = (s.gast || '').toUpperCase();
+    return h === k || g === k || h.startsWith(k.replace(/\d+$/,'')) && h === k
+        || g.startsWith(k.replace(/\d+$/,'')) && g === k
+        || k.startsWith(h.replace(/\d+$/,'')) && h.replace(/\d+$/,'') === k.replace(/\d+$/,'') && h === k
+        || h === k || g === k;
+  }).filter(s => {
+    const h = (s.heim || '').toUpperCase();
+    const g = (s.gast || '').toUpperCase();
+    return h === k || g === k;
+  });
+
+  const vergangen = spiele.filter(s => s.ergebnis);
+  const kuenftig  = spiele.filter(s => !s.ergebnis);
+
+  // Bilanz berechnen
+  let siege = 0, unent = 0, niederl = 0;
+  vergangen.forEach(s => {
+    if (!s.ergebnis) return;
+    const parts = s.ergebnis.split(':');
+    if (parts.length !== 2) return;
+    const h = parseInt(parts[0]), g = parseInt(parts[1]);
+    const istHeim = s.heim.toUpperCase() === k;
+    const teamPkt = istHeim ? h : g;
+    const gegPkt  = istHeim ? g : h;
+    if (teamPkt > gegPkt) siege++;
+    else if (teamPkt === gegPkt) unent++;
+    else niederl++;
+  });
+
+  // Ligatabelle-Eintrag für Punkte suchen
+  const tabZeile = document.querySelector(`tr[data-kuerzel="${kuerzel}"]`);
+  const punkte = tabZeile ? tabZeile.querySelectorAll('td')[6]?.textContent?.trim() : '–';
+
+  document.getElementById('tsTeamName').textContent = kuerzel;
+  document.getElementById('tsSp').textContent = vergangen.length;
+  document.getElementById('tsS').textContent  = siege;
+  document.getElementById('tsU').textContent  = unent;
+  document.getElementById('tsN').textContent  = niederl;
+  document.getElementById('tsP').textContent  = punkte || '–';
+
+  // Kommende Spiele
+  const kBody = document.getElementById('tsKuenftigBody');
+  kBody.innerHTML = kuenftig.length
+    ? kuenftig.map(s => `<tr>
+        <td class="mono">${s.datum}</td>
+        <td class="mono muted">${s.zeit}</td>
+        <td class="bold ${s.heim.toUpperCase()===k?'':'muted'}">${s.heim}</td>
+        <td class="center muted">vs</td>
+        <td class="bold ${s.gast.toUpperCase()===k?'':'muted'}">${s.gast}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="center muted" style="padding:1rem;">Keine kommenden Spiele</td></tr>';
+
+  // Vergangene Spiele (neueste zuerst)
+  const vBody = document.getElementById('tsVergBody');
+  vBody.innerHTML = vergangen.length
+    ? [...vergangen].reverse().map(s => {
+        const istHeim = s.heim.toUpperCase() === k;
+        const parts = s.ergebnis.split(':');
+        let badge = '', color = '';
+        if (parts.length === 2) {
+          const tp = istHeim ? parseInt(parts[0]) : parseInt(parts[1]);
+          const gp = istHeim ? parseInt(parts[1]) : parseInt(parts[0]);
+          if (tp > gp)       { badge = 'S'; color = 'var(--green)'; }
+          else if (tp === gp){ badge = 'U'; color = 'var(--muted)'; }
+          else               { badge = 'N'; color = 'var(--red)'; }
+        }
+        return `<tr>
+          <td class="mono">${s.datum}</td>
+          <td class="mono muted">${s.zeit}</td>
+          <td class="bold ${istHeim?'':'muted'}">${s.heim}</td>
+          <td class="center muted">vs</td>
+          <td class="bold ${!istHeim?'':'muted'}">${s.gast}</td>
+          <td class="center bold mono">${s.ergebnis}</td>
+          <td class="center bold" style="color:${color};">${badge}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="center muted" style="padding:1rem;">Keine gespielten Spiele</td></tr>';
+
+  keinTeam.style.display = 'none';
+  inhalt.style.display = '';
+}
 
 // ── Verlauf pro Spieler (alle Daten vom Server) ──
 const alleVerlauf = {{ verlauf_alle|safe }};
@@ -1143,6 +1285,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (mSel) {
       mSel.value = gespeichertMannschaft;
       highlightMannschaft(gespeichertMannschaft);
+      zeigeTeamSpiele(gespeichertMannschaft);
     }
   }
 });
@@ -1187,6 +1330,7 @@ def index():
     verlauf_siege   = json.dumps([e["siege"]   for e in verlauf])
     verlauf_niederl = json.dumps([e["niederl"] for e in verlauf])
     verlauf_alle_js = json.dumps(verlauf)
+    alle_spiele_js  = json.dumps(data["vergangene"] + data["kuenftige"])
 
     return render_template_string(
         HTML_TEMPLATE,
@@ -1208,6 +1352,7 @@ def index():
         verlauf_labels  = verlauf_labels,
         verlauf_rc      = verlauf_rc_js,
         verlauf_alle    = verlauf_alle_js,
+        alle_spiele     = alle_spiele_js,
         alle_kuerzel    = alle_kuerzel,
         alle_kuerzel_list = data['tabelle'],
         verlauf_siege   = verlauf_siege,

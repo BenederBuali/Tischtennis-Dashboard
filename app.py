@@ -65,62 +65,55 @@ def safe_text(el) -> str:
 def lade_ligatabelle() -> list:
     """
     Mannschaftstabelle scrapen.
-    XTTV-Struktur: jede Mannschaftszeile hat in der 1. TD einen Rang ("1."),
-    gefolgt von einem leeren Bild-TD, dann Mannschaftsname-TD mit Link,
-    Kürzel-TD mit Link, dann Sp/S/U/N, Spielverhältnis (Zahl : Zahl),
-    Satzverhältnis (Zahl : Zahl), Punkte.
-    Der Trick: wir nehmen nur Zeilen wo der erste <a>-Link ein tid= enthält.
+    Strategie: Zeilen mit Rang (1. 2. ...) in erster Zelle UND
+    einem title-Attribut im Link (enthält den vollen Vereinsnamen).
+    Das Kürzel steht als Link-Text (z.B. "SWER2"), der Name im title-Attribut.
     """
     soup = fetch(BASE_URL, {"lid": LIGA_ID})
     tabelle = []
-    rang_counter = 0
 
     for row in soup.find_all("tr"):
-        # Muss mindestens einen Link mit tid= haben (Mannschaft)
-        mann_link = row.find("a", href=lambda h: h and "tid=" in (h or "") and "do=spiele" in (h or ""))
-        if not mann_link:
-            continue
-
         zellen = row.find_all("td")
-        texts  = [safe_text(z) for z in zellen]
-        if len(texts) < 6:
+        if len(zellen) < 6:
             continue
+        texts = [safe_text(z) for z in zellen]
 
-        # Rang: erste Zelle die eine Zahl + Punkt enthält
+        # Rang muss in einer der ersten 3 Zellen stehen (Format "1." oder "1")
         rang = None
         for t in texts[:3]:
             clean = t.strip().rstrip(".")
-            if clean.isdigit():
+            if clean.isdigit() and 1 <= int(clean) <= 30:
                 rang = int(clean)
                 break
         if rang is None:
             continue
 
-        # Name und Kürzel aus den Links
-        links_mit_tid = row.find_all("a", href=lambda h: h and "tid=" in (h or ""))
-        name   = safe_text(links_mit_tid[0]) if links_mit_tid else ""
-        kürzel = safe_text(links_mit_tid[1]) if len(links_mit_tid) > 1 else ""
-        # Fallback: Kürzel ist oft der 2. Link-Text (kurze Abkürzung)
-        if not kürzel or len(kürzel) > 6:
-            alle_links = row.find_all("a")
-            for lnk in alle_links:
-                txt = lnk.get_text(strip=True)
-                if 3 <= len(txt) <= 6 and txt.isupper():
-                    kürzel = txt
-                    break
+        # Kürzel-Link: kurzer Link-Text (z.B. "SWER2"), title = voller Name
+        # XTTV: <a href="...tid=...&do=spiele" title="ASKö Schwertberg">SWER2</a>
+        kürzel = ""
+        name   = ""
+        for a in row.find_all("a"):
+            href  = a.get("href", "")
+            titel = a.get("title", "")
+            txt   = a.get_text(strip=True)
+            # Kürzel: 3-7 Zeichen, Großbuchstaben + Ziffern, hat tid= im href
+            if "tid=" in href and 3 <= len(txt) <= 7 and re.match(r'^[A-Z]+[0-9]*$', txt):
+                kürzel = txt
+                name   = titel if titel else txt
+                break
 
-        if not name:
+        # Fallback: erster Link mit tid= ist Name, zweiter ist Kürzel
+        if not kürzel:
+            links = [a for a in row.find_all("a") if "tid=" in a.get("href","")]
+            if links:
+                name   = links[0].get("title","") or safe_text(links[0])
+                kürzel = safe_text(links[1]) if len(links) > 1 else safe_text(links[0])[:6]
+
+        if not kürzel:
             continue
 
-        # Alle positiven ganzzahligen Werte (Sp, S, U, N, SpV, SzV, P)
-        # Wichtig: Spielverhältnis-Zahlen NICHT als P interpretieren
-        # Wir nehmen: Sp=nums[0], S=nums[1], U=nums[2], N=nums[3], P=nums[-1]
-        nums = []
-        for t in texts:
-            t2 = t.strip()
-            if t2.isdigit():
-                nums.append(int(t2))
-
+        # Nur positive ganze Zahlen sammeln (Sp, S, U, N, SpV_h, SpV_g, SzV_h, SzV_g, P)
+        nums = [int(t) for t in texts if t.strip().isdigit() and int(t.strip()) >= 0]
         if len(nums) < 5:
             continue
 
@@ -137,7 +130,14 @@ def lade_ligatabelle() -> list:
                         TEAM_KÜRZEL.upper() in name.upper(),
         })
 
-    return tabelle
+    # Deduplizieren (XTTV rendert Tabellen manchmal doppelt)
+    seen = set()
+    result = []
+    for t in tabelle:
+        if t["kürzel"] not in seen:
+            seen.add(t["kürzel"])
+            result.append(t)
+    return sorted(result, key=lambda x: x["rang"])
 
 
 def lade_einzelrangliste() -> list:
@@ -1013,6 +1013,24 @@ def index():
         verlauf_niederl = verlauf_niederl,
     )
 
+
+
+@app.route("/debug")
+def debug():
+    """Zeigt rohe Scraper-Ergebnisse zum Debuggen."""
+    with _cache_lock:
+        tabelle   = _cache["tabelle"]
+        rangliste = _cache["rangliste"]
+    lines = ["<pre style='font-family:monospace; font-size:12px;'>"]
+    lines.append(f"=== LIGATABELLE ({len(tabelle)} Eintraege) ===\n")
+    for t in tabelle:
+        lines.append(f"  {t['rang']}. {t['kürzel']:8} {t['name'][:30]:30} P={t['p']}\n")
+    lines.append(f"\n=== RANGLISTE ({len(rangliste)} Spieler) ===\n")
+    for s in rangliste[:40]:
+        ng = " [n.g.]" if s['nicht_gewertet'] else ""
+        lines.append(f"  {str(s['rang']):5} {s['name'][:25]:25} {s['verein']:6} {s['siege']}:{s['niederl']} RC={s['rc']}{ng}\n")
+    lines.append("</pre>")
+    return "".join(lines)
 
 @app.route("/api/status")
 def status():

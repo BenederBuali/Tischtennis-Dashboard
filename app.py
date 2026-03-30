@@ -816,7 +816,9 @@ function highlightMannschaft(kuerzel) {
   // Alle Zeilen zurücksetzen und neu highlighten
   document.querySelectorAll('tr[data-verein]').forEach(tr => {
     tr.classList.remove('swer-row');
-    if (kuerzel && tr.dataset.verein === kuerzel) {
+    const k = (kuerzel || '').trim().toUpperCase();
+    const v = (tr.dataset.verein || '').trim().toUpperCase();
+    if (k && (v === k || k.startsWith(v) || v.startsWith(k))) {
       tr.classList.add('swer-row');
     }
   });

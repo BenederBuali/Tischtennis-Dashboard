@@ -588,6 +588,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .ng-row td { opacity: 0.6; }
     .ng-row:hover td { opacity: 0.8 !important; }
 
+    .form-dot { display:inline-flex; align-items:center; justify-content:center;
+                width:22px; height:22px; border-radius:50%; font-size:11px;
+                font-weight:700; margin:0 2px; flex-shrink:0; }
+    .form-s { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid #4ade80; }
+    .form-u { background:rgba(107,114,128,0.15); color:#9ca3af; border:1px solid #6b7280; }
+    .form-n { background:rgba(248,113,113,0.15); color:#f87171; border:1px solid #f87171; }
+
+    .next-game { background:linear-gradient(135deg,#1e3a5f 0%,#22263a 100%);
+                 border:1px solid var(--swer-border); border-radius:var(--radius);
+                 padding:16px 20px; margin-bottom:16px;
+                 display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+    .next-game-label { font-size:11px; font-weight:600; text-transform:uppercase;
+                       letter-spacing:.08em; color:var(--swer-border); margin-bottom:4px; }
+    .next-game-teams { font-size:17px; font-weight:700; }
+    .next-game-meta  { font-size:12px; color:var(--muted); margin-top:3px; }
+    .next-game-badge { margin-left:auto; background:var(--swer-border); color:#fff;
+                       padding:5px 14px; border-radius:20px; font-size:12px; font-weight:600; }
+
+    .search-wrap { margin-bottom:12px; }
+    .search-input { background:var(--bg3); color:var(--text); border:1px solid var(--border);
+                    border-radius:6px; padding:7px 12px; font-size:13px;
+                    width:100%; max-width:280px; outline:none; }
+    .search-input:focus { border-color:var(--accent); }
+
     /* Mobile */
     @media (max-width: 600px) {
       header h1 { font-size: 14px; }
@@ -632,6 +656,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <!-- ÜBERSICHT -->
 <div id="tab-uebersicht" class="tab-content active">
+
+  {% if naechstes_swer %}
+  <div class="next-game">
+    <div>
+      <div class="next-game-label">⏭ Nächstes Spiel</div>
+      <div class="next-game-teams">
+        {{ naechstes_swer.heim }} <span style="color:var(--muted);font-weight:400;font-size:14px;"> vs </span> {{ naechstes_swer.gast }}
+      </div>
+      <div class="next-game-meta">{{ naechstes_swer.datum }} · {{ naechstes_swer.zeit }} Uhr</div>
+    </div>
+    <div class="next-game-badge">{% if naechstes_swer.heim.upper().startswith('SWER') %}Heimspiel{% else %}Auswärtsspiel{% endif %}</div>
+  </div>
+  {% endif %}
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Formkurve – letzte 5 SWER-Spiele</div>
+    <div id="formkurveWrap" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-height:30px;">
+      <span style="color:var(--muted); font-size:12px;">Wird geladen…</span>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-title">SWER-Spieler in der Liga</div>
     <div class="player-grid">
@@ -666,6 +711,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="tab-rangliste" class="tab-content">
   <div class="card">
     <div class="card-title">Einzelrangliste (SWER = blau, ausgewählter Spieler = grün)</div>
+    <div class="search-wrap">
+      <input id="ranglisteSearch" class="search-input" type="text"
+             placeholder="🔍 Name oder Verein suchen…"
+             oninput="filterRangliste(this.value)">
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -808,6 +858,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     ↑ Wähle oben eine Mannschaft um alle Spiele zu sehen
   </div>
   <div id="tsInhalt" style="display:none;">
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <div class="card-title" style="margin-bottom:0;">Formkurve (letzte 5)</div>
+        <div id="tsFormkurve" style="display:flex; gap:4px;"></div>
+      </div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="tsChart"></canvas></div>
+    </div>
     <div class="card">
       <div class="card-title">Kommende Spiele</div>
       <div class="table-wrap">
@@ -971,8 +1028,40 @@ new Chart(document.getElementById('barChart'), {
   }
 });
 
-// ── Team Spiele ──
+// ── Hilfsfunktionen ──
 const alleSpiele = {{ alle_spiele|safe }};
+
+function spielErgebnis(spiel, kuerzel) {
+  // Gibt 'S', 'U', 'N' oder '' zurück
+  if (!spiel.ergebnis) return '';
+  const parts = spiel.ergebnis.split(':');
+  if (parts.length !== 2) return '';
+  const h = parseInt(parts[0]), g = parseInt(parts[1]);
+  const istHeim = spiel.heim.toUpperCase() === kuerzel.toUpperCase();
+  const team = istHeim ? h : g, geg = istHeim ? g : h;
+  if (team > geg) return 'S';
+  if (team === geg) return 'U';
+  return 'N';
+}
+
+function formkurveDots(ergebnisse) {
+  return ergebnisse.map(e => {
+    const cls = e==='S'?'form-s':e==='U'?'form-u':'form-n';
+    return `<span class="form-dot ${cls}">${e}</span>`;
+  }).join('');
+}
+
+function filterRangliste(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('#tab-rangliste tbody tr').forEach(tr => {
+    if (tr.querySelector('td[colspan]')) return; // Trenner-Zeile
+    const name   = (tr.dataset.name   || '').toLowerCase();
+    const verein = (tr.dataset.verein || '').toLowerCase();
+    tr.style.display = (!q || name.includes(q) || verein.includes(q)) ? '' : 'none';
+  });
+}
+
+let tsChartObj = null;
 
 function zeigeTeamSpiele(kuerzel) {
   const k = (kuerzel || '').trim().toUpperCase();
@@ -1064,6 +1153,55 @@ function zeigeTeamSpiele(kuerzel) {
         </tr>`;
       }).join('')
     : '<tr><td colspan="7" class="center muted" style="padding:1rem;">Keine gespielten Spiele</td></tr>';
+
+  // Formkurve (letzte 5)
+  const letztefuenf = vergangen.slice(-5).map(s => spielErgebnis(s, k));
+  document.getElementById('tsFormkurve').innerHTML = formkurveDots(letztefuenf);
+
+  // Punkte-Verlauf Chart (kumulativ: S=+3, U=+2, N=+1)
+  let pkt = 0;
+  const pktLabels = [], pktData = [];
+  vergangen.forEach(s => {
+    const erg = spielErgebnis(s, k);
+    pkt += erg==='S' ? 3 : erg==='U' ? 2 : 1;
+    pktLabels.push(s.datum.slice(0,5)); // nur TT.MM
+    pktData.push(pkt);
+  });
+
+  if (tsChartObj) tsChartObj.destroy();
+  if (pktData.length > 0) {
+    const ctx = document.getElementById('tsChart').getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 180);
+    grad.addColorStop(0, 'rgba(55,138,221,0.3)');
+    grad.addColorStop(1, 'rgba(55,138,221,0.0)');
+    tsChartObj = new Chart(document.getElementById('tsChart'), {
+      type: 'line',
+      data: {
+        labels: pktLabels,
+        datasets: [{
+          data: pktData, borderColor: '#378ADD', backgroundColor: grad,
+          borderWidth: 2.5, pointRadius: 4, pointBackgroundColor: '#378ADD',
+          pointBorderColor: '#0f1117', pointBorderWidth: 2, tension: 0.3, fill: true
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#6b7280', padding: 10,
+            callbacks: { label: i => `  Punkte: ${i.raw}` }
+          }
+        },
+        scales: {
+          x: { ticks: { color:'#6b7280', font:{size:11} }, grid: { color:'#1e2133' } },
+          y: { ticks: { color:'#6b7280', font:{size:11} }, grid: { color:'#1e2133' }, beginAtZero: true }
+        }
+      }
+    });
+  }
 
   keinTeam.style.display = 'none';
   inhalt.style.display = '';
@@ -1269,6 +1407,30 @@ function zeigeVerlauf(name) {
 }
 
 // ── Beim Laden: gespeicherten Spieler wiederherstellen ──
+// Formkurve SWER auf Übersicht
+(function() {
+  const swerKuerzel = '{{ swer_kuerzel|safe }}';
+  if (!swerKuerzel) return;
+  const swerSpiele = alleSpiele
+    .filter(s => s.ergebnis && (s.heim.toUpperCase()===swerKuerzel.toUpperCase() || s.gast.toUpperCase()===swerKuerzel.toUpperCase()))
+    .sort((a,b) => a.ts - b.ts);
+  const letztefuenf = swerSpiele.slice(-5).map(s => spielErgebnis(s, swerKuerzel));
+  const wrap = document.getElementById('formkurveWrap');
+  if (wrap) {
+    if (letztefuenf.length === 0) {
+      wrap.innerHTML = '<span style="color:var(--muted);font-size:12px;">Keine Spieldaten verfügbar</span>';
+    } else {
+      const labels = swerSpiele.slice(-5).map(s => s.datum.slice(0,5));
+      wrap.innerHTML = letztefuenf.map((e,i) =>
+        `<div style="text-align:center;">
+          <span class="form-dot ${e==='S'?'form-s':e==='U'?'form-u':'form-n'}">${e}</span>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${labels[i]||''}</div>
+        </div>`
+      ).join('');
+    }
+  }
+})();
+
 window.addEventListener('DOMContentLoaded', () => {
   const gespeichert = localStorage.getItem('ttSpielerName');
   if (gespeichert) {
@@ -1304,6 +1466,12 @@ def index():
     rangliste  = data["rangliste"]
     verlauf    = data["verlauf"]
     swer_spieler = [s for s in rangliste if s["ist_swer"]]
+    # Nächstes SWER-Spiel
+    swer_kuenftige = [s for s in data["kuenftige"] if s.get("swer")]
+    naechstes_swer = swer_kuenftige[0] if swer_kuenftige else None
+    # SWER-Kürzel aus Tabelle ermitteln
+    swer_tabelle = [t for t in data["tabelle"] if t["ist_swer"]]
+    swer_kuerzel = swer_tabelle[0]["kürzel"] if swer_tabelle else TEAM_KÜRZEL
     # Alle Mannschaftskürzel aus der Tabelle für Auswahl
     alle_kuerzel = json.dumps([{"k": t["kürzel"], "n": t["name"]} for t in data["tabelle"]])
 
@@ -1355,6 +1523,8 @@ def index():
         alle_spiele     = alle_spiele_js,
         alle_kuerzel    = alle_kuerzel,
         alle_kuerzel_list = data['tabelle'],
+        naechstes_swer  = naechstes_swer,
+        swer_kuerzel    = swer_kuerzel,
         verlauf_siege   = verlauf_siege,
         verlauf_niederl = verlauf_niederl,
     )

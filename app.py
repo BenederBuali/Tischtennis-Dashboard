@@ -493,6 +493,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <title>ASKö Schwertberg TT Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏓</text></svg>">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -562,6 +564,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .green { color: var(--green); font-weight: 600; }
     .red { color: var(--red); }
 
+    .vl-filter-btn {
+      background: var(--bg3); color: var(--muted); border: 1px solid var(--border);
+      border-radius: 20px; padding: 5px 14px; font-size: 12px; cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .vl-filter-btn:hover { background: var(--bg2); color: var(--text); }
+    .vl-filter-btn.active { background: #378ADD22; color: #378ADD; border-color: #378ADD; }
+    .zoom-reset-btn {
+      display: block; margin: 8px auto 0; background: transparent; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px;
+      font-size: 11px; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .zoom-reset-btn:hover { color: var(--text); border-color: #6b7280; }
     .win-bar-wrap { position: relative; height: 16px; background: var(--bg3);
                     border-radius: 99px; min-width: 70px; overflow: hidden; }
     .win-bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
@@ -978,6 +993,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </select>
       <span id="aktSpielerInfo" style="font-size:12px; color:var(--muted);"></span>
     </div>
+    <div style="display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+      <span style="font-size:12px; color:var(--muted);">Einträge:</span>
+      <button class="vl-filter-btn active" onclick="setVerlaufLimit(0, this)">Alle</button>
+      <button class="vl-filter-btn" onclick="setVerlaufLimit(10, this)">10</button>
+      <button class="vl-filter-btn" onclick="setVerlaufLimit(25, this)">25</button>
+      <button class="vl-filter-btn" onclick="setVerlaufLimit(50, this)">50</button>
+      <button class="vl-filter-btn" onclick="setVerlaufLimit(100, this)">100</button>
+    </div>
   </div>
   <div id="verlaufInhalt">
     <p style="color:var(--muted); text-align:center; padding:3rem;">
@@ -1009,10 +1032,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="card">
     <div class="card-title">RC-Rating Verlauf</div>
     <div class="chart-wrap" style="height:280px;"><canvas id="verlaufChart"></canvas></div>
+    <button class="zoom-reset-btn" onclick="if(verlaufChartObj) verlaufChartObj.resetZoom()">Zoom zurücksetzen</button>
   </div>
   <div class="card">
     <div class="card-title">Siege &amp; Niederlagen Verlauf</div>
     <div class="chart-wrap" style="height:220px;"><canvas id="snChart"></canvas></div>
+    <button class="zoom-reset-btn" onclick="if(snChartObj) snChartObj.resetZoom()">Zoom zurücksetzen</button>
   </div>
   <div class="card">
     <div class="card-title">Alle Einträge</div>
@@ -1299,6 +1324,15 @@ function zeigeTeamSpiele(kuerzel) {
 const alleVerlauf = {{ verlauf_alle|safe }};
 let verlaufChartObj = null;
 let snChartObj = null;
+let verlaufLimit = 0; // 0 = alle
+
+function setVerlaufLimit(limit, btn) {
+  verlaufLimit = limit;
+  document.querySelectorAll('.vl-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const name = document.getElementById('spielerSelect').value;
+  if (name) zeigeVerlauf(name);
+}
 
 function waehleSpieler(name) {
   localStorage.setItem('ttSpielerName', name);
@@ -1357,10 +1391,12 @@ function zeigeVerlauf(name) {
   document.getElementById('mAnzahl').textContent = eintraege.length;
   document.getElementById('mErster').textContent = eintraege[0].datum;
 
-  const labels = eintraege.map(e => e.datum);
-  const rcVals = eintraege.map(e => e.rc);
-  const siegeVals = eintraege.map(e => e.siege);
-  const niedVals = eintraege.map(e => e.niederl);
+  // Für Charts nur die letzten N Einträge zeigen
+  const sichtbar = verlaufLimit > 0 ? eintraege.slice(-verlaufLimit) : eintraege;
+  const labels = sichtbar.map(e => e.datum);
+  const rcVals = sichtbar.map(e => e.rc);
+  const siegeVals = sichtbar.map(e => e.siege);
+  const niedVals = sichtbar.map(e => e.niederl);
 
   // Charts neu zeichnen oder updaten
   if (verlaufChartObj) verlaufChartObj.destroy();
@@ -1417,6 +1453,10 @@ function zeigeVerlauf(name) {
             title: items => items[0].label,
             label: item => `  RC: ${item.raw}`
           }
+        },
+        zoom: {
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+          pan: { enabled: true, mode: 'x' }
         }
       },
       scales: commonScales
@@ -1481,6 +1521,10 @@ function zeigeVerlauf(name) {
           titleColor: '#e2e8f0',
           bodyColor: '#6b7280',
           padding: 10,
+        },
+        zoom: {
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+          pan: { enabled: true, mode: 'x' }
         }
       },
       scales: commonScales

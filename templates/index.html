@@ -656,7 +656,10 @@ function renderSpielerKarten(kuerzel) {
   barChartObj = new Chart(document.getElementById('barChart'), {
     type: 'bar',
     data: {
-      labels: spieler.map(s => s.name.split(' ')[0]),
+      labels: spieler.map(s => {
+        const t = s.name.split(' ');
+        return t.length >= 2 ? t[0] + ' ' + t[t.length-1][0] + '.' : s.name;
+      }),
       datasets: [
         { label: 'Siege',       data: spieler.map(s => s.siege),  backgroundColor: 'rgba(74,222,128,0.75)', borderRadius: 4 },
         { label: 'Niederlagen', data: spieler.map(s => s.niederl), backgroundColor: 'rgba(248,113,113,0.75)', borderRadius: 4 },

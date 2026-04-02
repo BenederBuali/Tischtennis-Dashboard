@@ -526,6 +526,7 @@ def index():
     verlauf_niederl = json.dumps([e["niederl"] for e in verlauf])
     verlauf_alle_js = json.dumps(verlauf)
     alle_spiele_js  = json.dumps(data["vergangene"] + data["kuenftige"])
+    rangliste_js    = json.dumps(rangliste)
 
     return render_template(
         "index.html",
@@ -554,6 +555,7 @@ def index():
         swer_kuerzel    = swer_kuerzel,
         verlauf_siege   = verlauf_siege,
         verlauf_niederl = verlauf_niederl,
+        rangliste_js    = rangliste_js,
     )
 
 

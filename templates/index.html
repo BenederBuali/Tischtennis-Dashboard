@@ -283,27 +283,11 @@
   </div>
 
   <div class="card">
-    <div class="card-title">SWER-Spieler in der Liga</div>
-    <div class="player-grid">
-      {% for s in swer_spieler %}
-      <div class="player-card" style="cursor:pointer;" onclick="oeffneVerlauf('{{ s.name }}')">
-        <div class="player-avatar">{{ s.name.split()[0][0] }}{{ s.name.split()[-1][0] }}</div>
-        <div>
-          <div class="player-name">{{ s.name }}</div>
-          <div class="player-meta">Rang {{ s.rang }} · RC {{ s.rc }} · {{ s.einsaetze }} Einsätze</div>
-        </div>
-        <div class="player-stats">
-          <span class="stat-win">{{ s.siege }}S</span>
-          <span class="stat-sep">/</span>
-          <span class="stat-loss">{{ s.niederl }}N</span>
-          <span class="stat-pct">{{ s.win_pct }}%</span>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
+    <div class="card-title" id="spielerCardTitle">Spieler in der Liga</div>
+    <div class="player-grid" id="spielerGrid"></div>
   </div>
   <div class="card">
-    <div class="card-title">Siege & Niederlagen – SWER-Spieler</div>
+    <div class="card-title" id="barChartTitle">Siege & Niederlagen</div>
     <div class="chart-wrap"><canvas id="barChart"></canvas></div>
     <div class="legend">
       <span><span class="legend-dot" style="background:#4ade80;"></span>Siege</span>
@@ -589,6 +573,7 @@ function waehleMannschaft(kuerzel) {
   localStorage.setItem('ttMannschaft', kuerzel);
   highlightMannschaft(kuerzel);
   zeigeTeamSpiele(kuerzel);
+  renderSpielerKarten(kuerzel);
 }
 
 function highlightMannschaft(kuerzel) {
@@ -630,29 +615,63 @@ function switchTab(name) {
   event.target.classList.add('active');
 }
 
-// Balken-Chart SWER Spieler
-const swernamen  = {{ chart_namen|safe }};
-const swersiege  = {{ chart_siege|safe }};
-const swernied   = {{ chart_niederl|safe }};
+// ── Spieler-Karten & Bar-Chart ──
+const alleRangliste = {{ rangliste_js|safe }};
+let barChartObj = null;
 
-new Chart(document.getElementById('barChart'), {
-  type: 'bar',
-  data: {
-    labels: swernamen,
-    datasets: [
-      { label: 'Siege',       data: swersiege, backgroundColor: 'rgba(74,222,128,0.75)', borderRadius: 4 },
-      { label: 'Niederlagen', data: swernied,  backgroundColor: 'rgba(248,113,113,0.75)', borderRadius: 4 },
-    ]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } },
-      y: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } }
-    }
+function renderSpielerKarten(kuerzel) {
+  const basis = (kuerzel || '').replace(/\d+$/, '').toUpperCase();
+  const spieler = basis
+    ? alleRangliste.filter(s => s.verein.toUpperCase() === basis)
+    : alleRangliste.filter(s => s.ist_swer);
+
+  const label = kuerzel || 'SWER';
+  document.getElementById('spielerCardTitle').textContent = label + '-Spieler in der Liga';
+  document.getElementById('barChartTitle').textContent   = 'Siege & Niederlagen – ' + label + '-Spieler';
+
+  const grid = document.getElementById('spielerGrid');
+  if (spieler.length === 0) {
+    grid.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px 0;">Keine Spieler gefunden.</p>';
+  } else {
+    grid.innerHTML = spieler.map(s => {
+      const teile = s.name.split(' ');
+      const ini = teile.length >= 2 ? teile[0][0] + teile[teile.length-1][0] : s.name[0];
+      return `<div class="player-card" style="cursor:pointer;" onclick="oeffneVerlauf('${s.name.replace(/'/g,"\\'")}')">
+        <div class="player-avatar">${ini}</div>
+        <div>
+          <div class="player-name">${s.name}</div>
+          <div class="player-meta">Rang ${s.rang} · RC ${s.rc} · ${s.einsaetze} Einsätze</div>
+        </div>
+        <div class="player-stats">
+          <span class="stat-win">${s.siege}S</span>
+          <span class="stat-sep">/</span>
+          <span class="stat-loss">${s.niederl}N</span>
+          <span class="stat-pct">${s.win_pct}%</span>
+        </div>
+      </div>`;
+    }).join('');
   }
-});
+
+  if (barChartObj) barChartObj.destroy();
+  barChartObj = new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels: spieler.map(s => s.name.split(' ')[0]),
+      datasets: [
+        { label: 'Siege',       data: spieler.map(s => s.siege),  backgroundColor: 'rgba(74,222,128,0.75)', borderRadius: 4 },
+        { label: 'Niederlagen', data: spieler.map(s => s.niederl), backgroundColor: 'rgba(248,113,113,0.75)', borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } },
+        y: { ticks: { color: '#6b7280' }, grid: { color: '#1e2133' } }
+      }
+    }
+  });
+}
 
 // ── Hilfsfunktionen ──
 const alleSpiele = {{ alle_spiele|safe }};
@@ -1089,6 +1108,9 @@ function zeigeVerlauf(name) {
 })();
 
 window.addEventListener('DOMContentLoaded', () => {
+  const gespeichertMannschaftInit = localStorage.getItem('ttMannschaft');
+  renderSpielerKarten(gespeichertMannschaftInit || '{{ swer_kuerzel|safe }}');
+
   const gespeichert = localStorage.getItem('ttSpielerName');
   if (gespeichert) {
     const sel = document.getElementById('spielerSelect');

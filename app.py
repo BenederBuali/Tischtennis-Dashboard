@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 # ─── Konfiguration ─────────────────────────────────────────────────────────────
 
-LIGA_ID_DEFAULT = 8297          # Bekannte Liga-ID als Startpunkt
+LIGA_ID_DEFAULT = 8825          # Bekannte Liga-ID als Startpunkt
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
 TEAM_KÜRZEL = "SWER"
 ENCODING    = "iso-8859-1"

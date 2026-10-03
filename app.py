@@ -21,10 +21,12 @@ app = Flask(__name__)
 
 LIGA_ID_DEFAULT = 8825          # Bekannte Liga-ID als Startpunkt
 BASE_URL    = "https://oettv.xttv.at/ed/index.php"
-TEAM_KÜRZEL = "SWER"
+VEREIN_KÜRZEL   = "SWER"
+TEAM_KÜRZEL = "SWER2"
 ENCODING    = "iso-8859-1"
 UPDATE_INTERVALL_STUNDEN = 4
 LIGA_ID_SUCHBEREICH = 30        # Wie viele IDs rund um die bekannte ID durchsuchen
+AUTO_LIGA_SUCHE = False 
 
 VERLAUF_PFAD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tt_verlauf.json")
@@ -66,42 +68,55 @@ def safe_text(el) -> str:
 
 def finde_aktuelle_liga_id(bekannte_id: int) -> tuple:
     """
-    Prüft ob SWER noch in der bekannten Liga ist.
-    Falls nicht: sucht in benachbarten IDs (±LIGA_ID_SUCHBEREICH).
+    Prüft ob TEAM_KÜRZEL (exakt, z.B. "SWER2") noch in der bekannten Liga ist.
+    Nur wenn AUTO_LIGA_SUCHE = True: sucht bei Nichtfinden in benachbarten IDs.
     Gibt (liga_id, liga_name) zurück.
     """
-    def enthaelt_swer(lid: int) -> tuple:
+    if not AUTO_LIGA_SUCHE:
+        return bekannte_id, ""
+
+    def pruefe_liga(lid: int):
+        """
+        Rückgabe:
+          - Liga-Name (str)  -> Team ist in dieser Liga
+          - ""               -> Seite geladen, Team ist NICHT drin
+          - None             -> Netzfehler, keine Aussage möglich
+        """
         try:
             soup = fetch(BASE_URL, {"lid": lid})
-            for row in soup.find_all("tr"):
-                zellen = row.find_all("td")
-                if len(zellen) < 4:
-                    continue
-                if zellen[1].get("data-msrangsort"):
-                    kürzel = safe_text(zellen[3]).strip()
-                    if TEAM_KÜRZEL.upper() in kürzel.upper():
-                        # Liga-Namen aus Seitentitel lesen
-                        titel = soup.find("title")
-                        name = safe_text(titel).strip() if titel else str(lid)
-                        return True, name
         except Exception:
-            pass
-        return False, ""
+            return None
+        for row in soup.find_all("tr"):
+            zellen = row.find_all("td")
+            if len(zellen) < 4:
+                continue
+            if zellen[1].get("data-msrangsort"):
+                kürzel = safe_text(zellen[3]).strip()
+                # EXAKTER Vergleich, kein Teilstring (sonst matcht SWER1/SWER3 auch)
+                if kürzel.upper() == TEAM_KÜRZEL.upper():
+                    titel = soup.find("title")
+                    return (safe_text(titel).strip() if titel else "") or str(lid)
+        return ""
 
     # Zuerst bekannte ID prüfen
-    gefunden, name = enthaelt_swer(bekannte_id)
-    if gefunden:
-        return bekannte_id, name
+    ergebnis = pruefe_liga(bekannte_id)
 
-    print(f"SWER nicht in Liga {bekannte_id} – suche in benachbarten IDs...")
+    # Netzfehler: NICHT in Nachbarligen suchen, sondern ID behalten
+    if ergebnis is None:
+        print(f"Liga {bekannte_id} nicht erreichbar – behalte bekannte ID")
+        return bekannte_id, ""
+    if ergebnis:
+        return bekannte_id, ergebnis
+
+    print(f"{TEAM_KÜRZEL} nicht in Liga {bekannte_id} – suche in benachbarten IDs...")
     for offset in range(1, LIGA_ID_SUCHBEREICH + 1):
-        for kandidat in [bekannte_id + offset, bekannte_id - offset]:
-            gefunden, name = enthaelt_swer(kandidat)
-            if gefunden:
-                print(f"SWER gefunden in Liga {kandidat}: {name}")
+        for kandidat in (bekannte_id + offset, bekannte_id - offset):
+            name = pruefe_liga(kandidat)
+            if name:  # None (Fehler) und "" (nicht drin) werden übersprungen
+                print(f"{TEAM_KÜRZEL} gefunden in Liga {kandidat}: {name}")
                 return kandidat, name
 
-    print("SWER in keiner benachbarten Liga gefunden – behalte bekannte ID")
+    print(f"{TEAM_KÜRZEL} in keiner benachbarten Liga gefunden – behalte bekannte ID")
     return bekannte_id, ""
 
 
@@ -154,8 +169,8 @@ def lade_ligatabelle(liga_id: int = LIGA_ID_DEFAULT) -> list:
             "u":        to_int(zellen[6]),
             "n":        to_int(zellen[7]),
             "p":        to_int(zellen[14]),
-            "ist_swer": TEAM_KÜRZEL.upper() in kürzel.upper() or
-                        TEAM_KÜRZEL.upper() in name.upper(),
+            # Exakter Vergleich mit dem Mannschaftskürzel (SWER2)
+            "ist_swer": kürzel.upper() == TEAM_KÜRZEL.upper(),
         })
 
     return sorted(tabelle, key=lambda x: x["rang"])
@@ -248,14 +263,14 @@ def lade_einzelrangliste(liga_id: int = LIGA_ID_DEFAULT) -> list:
             "niederl":        n,
             "rc":             rc,
             "rc_player_id":   rc_player_id,
-            "ist_swer":       verein.upper() == TEAM_KÜRZEL.upper(),
+            # Die Rangliste zeigt nur das Vereinskürzel (SWER), nicht SWER2
+            "ist_swer":       verein.upper() == VEREIN_KÜRZEL.upper(),
             "ist_ich":        False,
             "win_pct":        round(s / (s + n) * 100, 1) if (s + n) > 0 else 0.0,
             "nicht_gewertet": nicht_gewertet,
         })
 
     return spieler
-
 
 def _parse_spiele_seite(soup, alle: list):
     for item in soup.select("li, tr"):
@@ -274,7 +289,8 @@ def _parse_spiele_seite(soup, alle: list):
         rest = text[mm.end():]
         erg = re.search(r"\b(\d{1,2}):(\d{1,2})\b", rest)
         ergebnis = f"{erg.group(1)}:{erg.group(2)}" if erg else ""
-        swer = TEAM_KÜRZEL.lower() in heim.lower() or TEAM_KÜRZEL.lower() in gast.lower()
+        # Exakter Vergleich: nur SWER2, nicht SWER1/SWER3
+        swer = TEAM_KÜRZEL.upper() in (heim.upper(), gast.upper())
         alle.append({
             "datum": dt.strftime("%a %d.%m.%Y"),
             "zeit":  m.group(2),
@@ -285,7 +301,6 @@ def _parse_spiele_seite(soup, alle: list):
             "ts":    dt.timestamp(),
             "_dt":   dt,
         })
-
 
 def lade_spiele(liga_id: int = LIGA_ID_DEFAULT) -> tuple:
     alle  = []
